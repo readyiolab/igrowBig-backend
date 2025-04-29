@@ -263,6 +263,7 @@ const CreateUser = [
     .withMessage('Subscription plan must be "yearly" or "monthly"'),
   async (req, res) => {
     try {
+      // Validate input
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
@@ -279,6 +280,7 @@ const CreateUser = [
         ? `${name}'s Store`
         : `Default Store ${Date.now()}`;
 
+      // Check if email exists
       const existingUser = await db.selectAll("tbl_users", "*", "email = ?", [
         normalizedEmail,
       ]);
@@ -289,6 +291,7 @@ const CreateUser = [
         });
       }
 
+      // Generate unique slug
       let baseSlug = slugify(name, { lower: true, strict: true });
       let slug = baseSlug;
       let slugCount = 0;
@@ -302,6 +305,7 @@ const CreateUser = [
         slug = `${baseSlug}-${slugCount}`;
       }
 
+      // Generate password
       const generatedPassword = generator.generate({
         length: 10,
         numbers: true,
@@ -311,9 +315,14 @@ const CreateUser = [
       });
       const hashedPassword = await bcrypt.hash(generatedPassword, 10);
 
-      const hostname = req.get("Host");
+      // Environment setup
+      // const baseDomain = process.env.NODE_ENV === 'production' ? 'begrat.com' : 'localhost:5173';
+      // const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+      // const domain = `${baseDomain}/${slug}`;
       const baseDomain =
-        hostname === "stage.begrat.com" ? "stage.begrat.com" : "begrat.com";
+        req.get("Host") === "stage.begrat.com"
+          ? "stage.begrat.com"
+          : "begrat.com";
       const protocol = "http";
       const domain = `${baseDomain}/${slug}`;
       const created_at = new Date()
@@ -322,6 +331,7 @@ const CreateUser = [
         .replace("T", " ");
       const updated_at = created_at;
 
+      // Insert tenant
       const tenantData = {
         store_name: `${name}'s Store`,
         template_id,
@@ -334,6 +344,7 @@ const CreateUser = [
       const tenantResult = await db.insert("tbl_tenants", tenantData);
       const tenantId = tenantResult.insert_id;
 
+      // Insert user
       const userData = {
         name,
         email: normalizedEmail,
@@ -347,8 +358,10 @@ const CreateUser = [
       const userResult = await db.insert("tbl_users", userData);
       const userId = userResult.insert_id;
 
+      // Update tenant with user_id
       await db.update("tbl_tenants", { user_id: userId }, "id = ?", [tenantId]);
 
+      // Insert settings
       const settingsData = {
         tenant_id: tenantId,
         domain_type: "path",
@@ -357,21 +370,22 @@ const CreateUser = [
         first_name: name.split(" ")[0] || name,
         last_name: name.split(" ")[1] || "",
         email_id: normalizedEmail,
-        mobile: null,
-        address: "Not provided",
+        mobile: "",
+        address: "",
         publish_on_site: 1,
-        skype: null,
+        skype: "",
         site_name: `${store_name}'s Site`,
         site_logo_url: null,
-        nht_website_link: null,
-        nht_store_link: null,
-        nht_joining_link: null,
+        nht_website_link: "https://example.com",
+        nht_store_link: "https://example.com",
+        nht_joining_link: "https://example.com",
         dns_status: "verified",
         created_at: new Date().toISOString().slice(0, 19).replace("T", " "),
         updated_at: new Date().toISOString().slice(0, 19).replace("T", " "),
       };
       await db.insert("tbl_settings", settingsData);
 
+      // Send welcome email
       await sendWelcomeEmail(normalizedEmail, {
         name,
         email: normalizedEmail,
@@ -467,11 +481,52 @@ const UpdateTenantSettings = [
     .withMessage("Domain type must be 'path' or 'primary_domain'"),
   body("primary_domain_name")
     .optional()
-    .custom((value) => {
-      if (!value) return true;
+    .custom((value, { req }) => {
+      if (!value) return true; // Allow empty if optional
+      if (process.env.NODE_ENV !== "production") {
+        // Allow localhost or localhost:port in development
+        return (
+          value === "localhost" ||
+          /^localhost(:\d+)?$/.test(value) ||
+          /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(value)
+        );
+      }
+      // Enforce strict domain validation in production
       return /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(value);
     })
-    .withMessage("Invalid domain name (e.g., example.com)"),
+    .withMessage("Invalid domain name"),
+  body("site_name")
+    .optional()
+    .notEmpty()
+    .withMessage("Site name cannot be empty"),
+  body("email_id").optional().isEmail().withMessage("Invalid email address"),
+  body("first_name")
+    .optional()
+    .notEmpty()
+    .withMessage("First name cannot be empty"),
+  body("last_name")
+    .optional()
+    .notEmpty()
+    .withMessage("Last name cannot be empty"),
+  body("mobile")
+    .optional()
+    .isMobilePhone()
+    .withMessage("Invalid mobile number"),
+  body("address").optional().notEmpty().withMessage("Address cannot be empty"),
+  body("skype").optional().notEmpty().withMessage("Skype ID cannot be empty"),
+  body("nht_website_link")
+    .optional()
+    .isURL()
+    .withMessage("Invalid website link"),
+  body("nht_store_link").optional().isURL().withMessage("Invalid store link"),
+  body("nht_joining_link")
+    .optional()
+    .isURL()
+    .withMessage("Invalid joining link"),
+  body("publish_on_site")
+    .optional()
+    .isBoolean()
+    .withMessage("Publish on site must be a boolean"),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -480,7 +535,21 @@ const UpdateTenantSettings = [
       }
 
       const { tenantId } = req.params;
-      const { domain_type, primary_domain_name } = req.body;
+      const {
+        domain_type,
+        primary_domain_name,
+        site_name,
+        email_id,
+        first_name,
+        last_name,
+        mobile,
+        address,
+        skype,
+        nht_website_link,
+        nht_store_link,
+        nht_joining_link,
+        publish_on_site,
+      } = req.body;
 
       const normalizedTenantId = parseInt(tenantId, 10);
       if (isNaN(normalizedTenantId)) {
@@ -496,7 +565,8 @@ const UpdateTenantSettings = [
         "tenant_id = ?",
         [normalizedTenantId]
       );
-      const currentSettings = existingSettings.length > 0 ? existingSettings[0] : {};
+      const currentSettings =
+        existingSettings.length > 0 ? existingSettings[0] : {};
 
       const tenant = await db.selectAll("tbl_tenants", "*", "id = ?", [
         normalizedTenantId,
@@ -512,7 +582,9 @@ const UpdateTenantSettings = [
       let domain = tenant[0].domain;
       let websiteLink = currentSettings.website_link;
       const baseDomain =
-        req.get("Host") === "stage.begrat.com" ? "stage.begrat.com" : "begrat.com";
+        req.get("Host") === "stage.begrat.com"
+          ? "stage.begrat.com"
+          : "begrat.com";
       const protocol = "http";
 
       if (
@@ -533,18 +605,23 @@ const UpdateTenantSettings = [
           });
         }
 
-        const dnsResult = await verifyTenantDomain(normalizedTenantId, primary_domain_name);
-        dnsStatus = dnsResult.status;
-        if (dnsStatus !== "verified") {
-          return res.status(400).json({
-            error: "DNS_NOT_VERIFIED",
-            message: `DNS verification failed for ${primary_domain_name}.`,
-            dnsInstructions: {
-              message: "Configure an A record pointing to 139.59.3.58.",
-              ip: "139.59.3.58",
-              status: dnsStatus,
-            },
-          });
+        let dnsResult = { status: "verified" }; // Local default
+        if (process.env.NODE_ENV === "production") {
+          dnsResult = await verifyTenantDomain(
+            normalizedTenantId,
+            primary_domain_name
+          );
+          dnsStatus = dnsResult.status;
+          if (dnsStatus !== "verified") {
+            return res.status(400).json({
+              error: "DNS_NOT_VERIFIED",
+              message: `DNS verification failed for ${primary_domain_name}. Ensure the A record points to 139.59.3.58.`,
+            });
+          }
+        } else {
+          console.log(
+            `Local testing: Add to /etc/hosts: 127.0.0.1 ${primary_domain_name}`
+          );
         }
 
         domain = primary_domain_name;
@@ -561,7 +638,7 @@ const UpdateTenantSettings = [
       }
 
       if (domain !== tenant[0].domain) {
-        await db.update(
+        const updateTenantResult = await db.update(
           "tbl_tenants",
           {
             domain,
@@ -570,6 +647,12 @@ const UpdateTenantSettings = [
           "id = ?",
           [normalizedTenantId]
         );
+        if (
+          !updateTenantResult.status ||
+          updateTenantResult.affected_rows === 0
+        ) {
+          throw new Error("Failed to update tenant domain");
+        }
       }
 
       const settingsData = {
@@ -579,24 +662,81 @@ const UpdateTenantSettings = [
             ? primary_domain_name || currentSettings.primary_domain_name
             : baseDomain,
         website_link: websiteLink || currentSettings.website_link,
+        first_name:
+          first_name ||
+          currentSettings.first_name ||
+          tenant[0].store_name.split(" ")[0],
+        last_name: last_name || currentSettings.last_name || "",
+        email_id: email_id || currentSettings.email_id || tenant[0].email || "",
+        mobile: mobile || currentSettings.mobile || null,
+        address: address || currentSettings.address || "Not provided",
+        publish_on_site:
+          publish_on_site !== undefined
+            ? publish_on_site
+            : currentSettings.publish_on_site ?? 1,
+        skype: skype || currentSettings.skype || null,
+        site_name:
+          site_name || currentSettings.site_name || tenant[0].store_name,
+        nht_website_link:
+          nht_website_link || currentSettings.nht_website_link || null,
+        nht_store_link:
+          nht_store_link || currentSettings.nht_store_link || null,
+        nht_joining_link:
+          nht_joining_link || currentSettings.nht_joining_link || null,
         dns_status: dnsStatus,
         updated_at: new Date().toISOString().slice(0, 19).replace("T", " "),
       };
 
+      if (req.files && req.files["site_logo"]) {
+        const logoFile = req.files["site_logo"][0];
+        const folder = `settings/tenant_${normalizedTenantId}`;
+        const fileObject = {
+          path: logoFile.path,
+          filename: `${Date.now()}-${logoFile.originalname}`,
+          mimetype: logoFile.mimetype,
+        };
+
+        if (currentSettings.site_logo_url) {
+          await deleteFromS3(currentSettings.site_logo_url);
+        }
+
+        settingsData.site_logo_url = await uploadToS3(fileObject, folder);
+      } else {
+        settingsData.site_logo_url = currentSettings.site_logo_url || null;
+      }
+
       if (existingSettings.length > 0) {
-        await db.update("tbl_settings", settingsData, "tenant_id = ?", [normalizedTenantId]);
+        const updateSettingsResult = await db.update(
+          "tbl_settings",
+          settingsData,
+          "tenant_id = ?",
+          [normalizedTenantId]
+        );
+        if (!updateSettingsResult.status) {
+          throw new Error("Failed to update settings");
+        }
       } else {
         settingsData.tenant_id = normalizedTenantId;
-        settingsData.created_at = new Date().toISOString().slice(0, 19).replace("T", " ");
-        await db.insert("tbl_settings", settingsData);
+        settingsData.created_at = new Date()
+          .toISOString()
+          .slice(0, 19)
+          .replace("T", " ");
+        const insertSettingsResult = await db.insert(
+          "tbl_settings",
+          settingsData
+        );
+        if (!insertSettingsResult.status) {
+          throw new Error("Failed to insert settings");
+        }
       }
 
       if (domain !== tenant[0].domain) {
         await sendDomainNotification(
-          currentSettings.email_id || tenant[0].email || "",
+          email_id || currentSettings.email_id || tenant[0].email || "",
           domain,
           dnsStatus
         );
+        await sendWebhook(normalizedTenantId, domain, dnsStatus);
       }
 
       const updatedSettings = await db.selectAll(
@@ -609,14 +749,6 @@ const UpdateTenantSettings = [
       res.status(200).json({
         message: "Settings updated successfully",
         settings: updatedSettings[0] || settingsData,
-        dnsInstructions:
-          domain_type === "primary_domain" && dnsStatus !== "verified"
-            ? {
-                message: "Configure an A record pointing to 139.59.3.58.",
-                ip: "139.59.3.58",
-                status: dnsStatus,
-              }
-            : null,
       });
     } catch (error) {
       console.error("UpdateTenantSettings Error:", error.stack);

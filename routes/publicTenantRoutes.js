@@ -1,4 +1,3 @@
-// routes/publicTenantRoutes.js
 const express = require("express");
 const router = express.Router();
 const {
@@ -16,15 +15,12 @@ const {
   getDisclaimersBySlug,
   getAboutProductPageBySlug,
   getHomePageBySlug,
-  getSliderBannersBySlug
+  getSliderBannersBySlug,
+  Bydomain
 } = require("../controllers/publicTenantController.js");
 
-
-
-// Get all site data for a tenant
 router.get("/site/:slug", getTenantSiteData);
-
-
+router.get("/site/by-domain", Bydomain);
 router.get("/site/:slug/product-page", getProductPageBySlug);
 router.get("/site/:slug/opportunity-page", getOpportunityPageBySlug);
 router.get("/site/:slug/joinus-page", getJoinUsPageBySlug);
@@ -39,6 +35,5 @@ router.get("/site/:slug/footer/disclaimers", getDisclaimersBySlug);
 router.get("/site/:slug/about-product-page", getAboutProductPageBySlug);
 router.get("/site/:slug/home-page", getHomePageBySlug);
 router.get("/site/:slug/slider-banners", getSliderBannersBySlug);
-
 
 module.exports = router;
