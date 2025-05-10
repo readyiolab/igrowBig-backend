@@ -97,8 +97,8 @@ const newsletterRoutes = require("./routes/newsletterRoutes");
 
 const allowedOrigins = [
   "http://localhost:5173",
-  "http://stage.begrat.com",
-  "http://begrat.com",
+  "https://igrowbig.com",
+  "http://igrowbig.com",
 ];
 
 app.use(

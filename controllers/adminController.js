@@ -313,7 +313,7 @@ const CreateUser = [
 
       const hostname = req.get("Host");
       const baseDomain =
-        hostname === "stage.begrat.com" ? "stage.begrat.com" : "begrat.com";
+        hostname === "igrowbig.com" ? "igrowbig.com" : "igrowbig.com";
       const protocol = "http";
       const domain = `${baseDomain}/${slug}`;
       const created_at = new Date()
@@ -423,8 +423,8 @@ const GetTenantSettings = [
         const defaultSettings = {
           tenant_id: tenantId,
           domain_type: "sub_domain",
-          primary_domain_name: "begrat.com",
-          website_link: "https://begrat.com",
+          primary_domain_name: "igrowbig.com",
+          website_link: "http://igrowbig.com",
           first_name: "",
           last_name: "",
           email_id: "",
@@ -540,8 +540,8 @@ const UpdateTenantSettings = [
             error: "DNS_NOT_VERIFIED",
             message: `DNS verification failed for ${primary_domain_name}.`,
             dnsInstructions: {
-              message: "Configure an A record pointing to 139.59.3.58.",
-              ip: "139.59.3.58",
+              message: "Configure an A record pointing to 82.29.160.167.",
+              ip: "82.29.160.167",
               status: dnsStatus,
             },
           });
@@ -612,8 +612,8 @@ const UpdateTenantSettings = [
         dnsInstructions:
           domain_type === "primary_domain" && dnsStatus !== "verified"
             ? {
-                message: "Configure an A record pointing to 139.59.3.58.",
-                ip: "139.59.3.58",
+                message: "Configure an A record pointing to 82.29.160.167.",
+                ip: "82.29.160.167",
                 status: dnsStatus,
               }
             : null,
