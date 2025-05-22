@@ -3,7 +3,7 @@ const db = require("../config/db");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
-const { sendWelcomeEmail, transporter } = require("../config/email");
+const { sendWelcomeEmail, transporter, sendPasswordResetEmail } = require("../config/email");
 const generator = require("generate-password");
 const multer = require("multer");
 const path = require("path");
@@ -376,8 +376,8 @@ const CreateUser = [
         name,
         email: normalizedEmail,
         password: generatedPassword,
-        website_link: `${protocol}://${baseDomain}/${slug}`,
-        backoffice: `${protocol}://${baseDomain}/backoffice-login`,
+        login_url: `${protocol}://${baseDomain}/backoffice-login`,
+        store_url: `${protocol}://${baseDomain}/${slug}`,
         subscription_status: "Active",
         subscription_plan,
       });
@@ -739,16 +739,25 @@ const ResetUserPassword = [
         });
       }
 
-      await sendWelcomeEmail(
+      // Fetch tenant data to construct store_url
+      const tenant = await db.select("tbl_tenants", "slug, domain", "user_id = ?", [user_id]);
+      const tenantData = normalizeResult(tenant);
+      const baseDomain = "igrowbig.com";
+      const protocol = "http";
+      const store_url = tenantData?.slug ? `${protocol}://${baseDomain}/${tenantData.slug}` : `${protocol}://${baseDomain}/default-store`;
+      const login_url = `${protocol}://${baseDomain}/backoffice-login`;
+
+      await sendPasswordResetEmail(
         tenant_email,
         {
           email: tenant_email,
           password: new_password,
           name: userData.name || "User",
-          subscription_plan: userData.subscription_plan || "unknown",
-          subscription_status: userData.subscription_status || "active",
-        },
-        true
+          subscription_plan: userData.subscription_plan || "yearly",
+          subscription_status: userData.subscription_status ? "Active" : "Inactive",
+          login_url,
+          store_url,
+        }
       );
 
       res.json({

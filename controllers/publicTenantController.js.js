@@ -148,7 +148,7 @@ const getTenantBySlugInternal = async (slug) => {
   try {
     const tenant = await db.select("tbl_tenants", "*", "slug = ?", [slug]);
     console.log("Raw db.select result for tbl_tenants:", tenant);
-    if (!tenant) {
+    if (!tenant || tenant.length === 0) {
       console.log("No tenant found for slug:", slug);
       throw new Error("TENANT_NOT_FOUND");
     }
@@ -164,25 +164,29 @@ const getTenantByDomainInternal = async (host) => {
   console.log("getTenantByDomainInternal called with host:", host);
   try {
     let tenant = null;
-
     const normalizedHost = host.replace(/^www\./, "").split(":")[0];
     console.log("Normalized host:", normalizedHost);
 
-    if (
-      normalizedHost === "begrat.com" ||
-      normalizedHost === "stage.begrat.com" ||
-      normalizedHost.includes("localhost")
+    // Allow tenant lookup for localhost in development
+    if (process.env.NODE_ENV === "development" && normalizedHost.includes("localhost")) {
+      // Option 1: Hardcode a tenant for testing
+      tenant = await db.select("tbl_tenants", "*", "slug = ?", ["by-domain"]);
+      // Option 2: Allow domain-based lookup for localhost
+      // tenant = await db.select("tbl_tenants", "*", "domain = ?", [host]);
+    } else if (
+      normalizedHost === "igrowbig.com" 
+      
     ) {
-      console.log("Main domain or localhost, returning null");
+      console.log("Main domain, returning null");
       return null;
     }
 
-    if (normalizedHost.endsWith(".begrat.com")) {
+    if (!tenant && normalizedHost.endsWith(".igrowbig.com")) {
       const subdomain = normalizedHost.split(".")[0];
       tenant = await db.select("tbl_tenants", "*", "domain = ?", [
-        `${subdomain}.begrat.com`,
+        `${subdomain}.igrowbig.com`,
       ]);
-    } else {
+    } else if (!tenant) {
       const settings = await db.select(
         "tbl_settings",
         "*",
@@ -232,7 +236,7 @@ const getTenantSiteData = async (req, res) => {
         tenant = await getTenantByDomainInternal(host);
       } catch (error) {
         if (error.message === "TENANT_NOT_FOUND") {
-          return res.redirect("http://begrat.com");
+          return res.redirect("http://igrowbig.com");
         }
         throw error;
       }

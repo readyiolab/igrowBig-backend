@@ -1,0 +1,159 @@
+const CreateUser = [
+  body("email").isEmail().withMessage("Please enter a valid email address"),
+  body("name").notEmpty().withMessage("Name is required"),
+  body("template_id")
+    .optional()
+    .isInt({ min: 1, max: 3 })
+    .withMessage("Template ID must be between 1 and 3"),
+  body("subscription_plan")
+    .optional()
+    .isIn(["yearly", "monthly"])
+    .withMessage('Subscription plan must be "yearly" or "monthly"'),
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const {
+        name,
+        email,
+        template_id = 1,
+        subscription_plan = "yearly",
+      } = req.body;
+      const normalizedEmail = email.trim().toLowerCase();
+      const store_name = name
+        ? `${name}'s Store`
+        : `Default Store ${Date.now()}`;
+
+      const existingUser = await db.selectAll("tbl_users", "*", "email = ?", [
+        normalizedEmail,
+      ]);
+      if (existingUser.length > 0) {
+        return res.status(400).json({
+          error: "EMAIL_EXISTS",
+          message: "Email already exists",
+        });
+      }
+
+      let baseSlug = slugify(name, { lower: true, strict: true });
+      let slug = baseSlug;
+      let slugCount = 0;
+
+      while (true) {
+        const slugExists = await db.selectAll("tbl_tenants", "id", "slug = ?", [
+          slug,
+        ]);
+        if (slugExists.length === 0) break;
+        slugCount++;
+        slug = `${baseSlug}-${slugCount}`;
+      }
+
+      const generatedPassword = generator.generate({
+        length: 10,
+        numbers: true,
+        symbols: true,
+        uppercase: true,
+        lowercase: true,
+      });
+      const hashedPassword = await bcrypt.hash(generatedPassword, 10);
+
+      const hostname = req.get("Host");
+      const baseDomain =
+        hostname === "igrowbig.com" ? "igrowbig.com" : "igrowbig.com";
+      const protocol = "http";
+      const domain = `${baseDomain}/${slug}`;
+      const created_at = new Date()
+        .toISOString()
+        .slice(0, 19)
+        .replace("T", " ");
+      const updated_at = created_at;
+
+      const tenantData = {
+        store_name: `${name}'s Store`,
+        template_id,
+        user_id: null,
+        domain,
+        slug,
+        created_at,
+        updated_at,
+      };
+      const tenantResult = await db.insert("tbl_tenants", tenantData);
+      const tenantId = tenantResult.insert_id;
+
+      const userData = {
+        name,
+        email: normalizedEmail,
+        tenant_id: tenantId,
+        template_id,
+        password_hash: hashedPassword,
+        created_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+        subscription_status: 1,
+        subscription_plan,
+      };
+      const userResult = await db.insert("tbl_users", userData);
+      const userId = userResult.insert_id;
+
+      await db.update("tbl_tenants", { user_id: userId }, "id = ?", [tenantId]);
+
+      const settingsData = {
+        tenant_id: tenantId,
+        domain_type: "path",
+        primary_domain_name: baseDomain,
+        website_link: `${protocol}://${baseDomain}/${slug}`,
+        first_name: name.split(" ")[0] || name,
+        last_name: name.split(" ")[1] || "",
+        email_id: normalizedEmail,
+        mobile: null,
+        address: "Not provided",
+        publish_on_site: 1,
+        skype: null,
+        site_name: `${store_name}'s Site`,
+        site_logo_url: null,
+        nht_website_link: null,
+        nht_store_link: null,
+        nht_joining_link: null,
+        dns_status: "verified",
+        created_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+        updated_at: new Date().toISOString().slice(0, 19).replace("T", " "),
+      };
+      await db.insert("tbl_settings", settingsData);
+
+      await sendWelcomeEmail(normalizedEmail, {
+        name,
+        email: normalizedEmail,
+        password: generatedPassword,
+        website_link: `${protocol}://${baseDomain}/${slug}`,
+        backoffice: `${protocol}://${baseDomain}/backoffice-login`,
+        subscription_status: "Active",
+        subscription_plan,
+      });
+
+      res.status(201).json({
+        user_id: userId,
+        tenant_id: tenantId,
+        tenant_slug: slug,
+        template_id,
+        email: normalizedEmail,
+        name,
+        store_url: `${protocol}://${baseDomain}/${slug}`,
+      });
+    } catch (error) {
+      console.error("CreateUser Error:", error.stack);
+      if (error.code === "ER_DUP_ENTRY") {
+        return res.status(400).json({
+          error: "DUPLICATE_ENTRY",
+          message: "A user or tenant with this email or slug already exists",
+        });
+      }
+      if (error.code === "ER_BAD_FIELD_ERROR") {
+        return res.status(400).json({
+          error: "DATABASE_ERROR",
+          message: "Invalid field in database operation",
+        });
+      }
+      res.status(500).json({ error: "SERVER_ERROR", message: error.message });
+    }
+  },
+];

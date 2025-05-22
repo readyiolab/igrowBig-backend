@@ -96,7 +96,7 @@ const publicTenantRoutes = require("./routes/publicTenantRoutes");
 const newsletterRoutes = require("./routes/newsletterRoutes");
 
 const allowedOrigins = [
-  "http://localhost:5173",
+  "http://localhost:5174",
   "https://igrowbig.com",
   "http://igrowbig.com",
 ];
