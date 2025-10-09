@@ -167,48 +167,55 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 const CreateUser = [
-  body("email").isEmail().withMessage("Please enter a valid email address"),
-  body("name").notEmpty().withMessage("Name is required"),
-  body("subdomain")
+  // Validation middleware
+  body('email').isEmail().withMessage('Please enter a valid email address'),
+  body('name').notEmpty().withMessage('Name is required'),
+  body('subdomain')
     .notEmpty()
-    .withMessage("Subdomain is required")
+    .withMessage('Subdomain is required')
     .matches(/^[a-z0-9-]+$/)
-    .withMessage("Subdomain can only contain lowercase letters, numbers, and hyphens")
+    .withMessage('Subdomain can only contain lowercase letters, numbers, and hyphens')
     .isLength({ min: 3, max: 63 })
-    .withMessage("Subdomain must be between 3 and 63 characters"),
-  body("country")
+    .withMessage('Subdomain must be between 3 and 63 characters'),
+  body('country')
     .notEmpty()
-    .withMessage("Country is required"),
-  body("template_id")
+    .withMessage('Country is required'),
+  body('template_id')
     .optional()
     .isInt({ min: 1, max: 3 })
-    .withMessage("Template ID must be between 1 and 3"),
-  body("subscription_plan")
-    .optional()
-    .isIn(["monthly", "quarterly"])
+    .withMessage('Template ID must be between 1 and 3'),
+  body('subscription_plan')
+    .notEmpty()
+    .withMessage('Subscription plan is required')
+    .isIn(['monthly', 'quarterly'])
     .withMessage('Subscription plan must be "monthly" or "quarterly"'),
   async (req, res) => {
     try {
+      // Validate request
       const errors = validationResult(req);
-      if (!errors.isEmpty())
+      if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
+      }
 
-      const { country } = req.body;
+      const { country, name, email, subdomain, template_id = 1, subscription_plan = 'monthly' } = req.body;
 
-      // ========== STEP 0: VALIDATE COUNTRY & PRODUCTS FIRST ==========
+      // Log incoming payload for debugging
+      console.log('Received payload:', req.body);
+
+      // ========== STEP 0: VALIDATE COUNTRY & PRODUCTS ==========
       console.log(`🔍 Validating country: ${country}`);
       
       // Check if country exists in pricing table
       const isValidCountry = await validateCountry(country);
       if (!isValidCountry) {
         return res.status(400).json({
-          error: "INVALID_COUNTRY",
+          error: 'INVALID_COUNTRY',
           message: `Country "${country}" is not supported or has no products available`,
         });
       }
 
       // Check if products exist for this country
-      const productsCount = await db.query(
+      const [productsCount] = await db.query(
         `SELECT COUNT(*) as count 
          FROM tbl_products_global p
          JOIN tbl_productpricing pp ON p.id = pp.productId
@@ -218,52 +225,39 @@ const CreateUser = [
 
       if (!productsCount || productsCount.count === 0) {
         return res.status(400).json({
-          error: "NO_PRODUCTS",
+          error: 'NO_PRODUCTS',
           message: `No products available for country: ${country}`,
         });
       }
 
       console.log(`✅ Country validated: ${productsCount.count} products available`);
 
-      // ========== NOW PROCEED WITH USER CREATION ==========
-      const {
-        name,
-        email,
-        subdomain,
-        template_id = 1,
-        subscription_plan = "monthly",
-      } = req.body;
-
+      // ========== PROCEED WITH USER CREATION ==========
       const normalizedEmail = email.trim().toLowerCase();
       const normalizedSubdomain = subdomain.trim().toLowerCase();
       const store_name = `${name}'s Store`;
-      const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
+      const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || 'igrowbig.com';
       const fullSubdomain = `${normalizedSubdomain}.${baseDomain}`;
-      const protocol = "https";
-      const timestamp = new Date().toISOString().slice(0, 19).replace("T", " ");
+      const protocol = 'https';
+      const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
       // Check if user exists
-      const existingUser = await db.selectAll("tbl_users", "*", "email = ?", [
-        normalizedEmail,
-      ]);
-      if (existingUser.length > 0)
+      const existingUser = await db.selectAll('tbl_users', '*', 'email = ?', [normalizedEmail]);
+      if (existingUser.length > 0) {
         return res.status(400).json({
-          error: "EMAIL_EXISTS",
-          message: "Email already exists",
+          error: 'EMAIL_EXISTS',
+          message: 'Email already exists',
         });
+      }
 
       // Check if subdomain is taken
-      const subdomainExists = await db.selectAll(
-        "tbl_tenants",
-        "id",
-        "domain = ?",
-        [fullSubdomain]
-      );
-      if (subdomainExists.length > 0)
+      const subdomainExists = await db.selectAll('tbl_tenants', 'id', 'domain = ?', [fullSubdomain]);
+      if (subdomainExists.length > 0) {
         return res.status(400).json({
-          error: "SUBDOMAIN_EXISTS",
-          message: "This subdomain is already taken",
+          error: 'SUBDOMAIN_EXISTS',
+          message: 'This subdomain is already taken',
         });
+      }
 
       // Generate password
       const generatedPassword = generator.generate({
@@ -282,11 +276,11 @@ const CreateUser = [
         user_id: null,
         domain: fullSubdomain,
         custom_domain: null,
-        custom_domain_status: "pending",
+        custom_domain_status: 'pending',
         created_at: timestamp,
         updated_at: timestamp,
       };
-      const tenantResult = await db.insert("tbl_tenants", tenantData);
+      const tenantResult = await db.insert('tbl_tenants', tenantData);
       const tenantId = tenantResult.insert_id;
 
       // Insert user
@@ -297,28 +291,30 @@ const CreateUser = [
         template_id,
         password_hash: hashedPassword,
         created_at: timestamp,
-        subscription_status: "1",
-        subscription_plan,
+        subscription_status: '1',
+        subscription_plan, // Correct field name
       };
-      const userResult = await db.insert("tbl_users", userData);
+      console.log('Inserting user data:', userData); // Log data for debugging
+      const userResult = await db.insert('tbl_users', userData);
       const userId = userResult.insert_id;
 
-      await db.update("tbl_tenants", { user_id: userId }, "id = ?", [tenantId]);
+      // Update tenant with user_id
+      await db.update('tbl_tenants', { user_id: userId }, 'id = ?', [tenantId]);
 
       // Insert settings
-      const currency = countryToCurrencyMap[country] || "USD";
-      const currencySymbol = currencyMap[currency] || "$";
+      const currency = countryToCurrencyMap[country] || 'USD';
+      const currencySymbol = currencyMap[currency] || '$';
       
       const settingsData = {
         tenant_id: tenantId,
-        domain_type: "sub_domain",
+        domain_type: 'sub_domain',
         primary_domain_name: fullSubdomain,
         website_link: `${protocol}://${fullSubdomain}`,
-        first_name: name.split(" ")[0] || name,
-        last_name: name.split(" ")[1] || "",
+        first_name: name.split(' ')[0] || name,
+        last_name: name.split(' ')[1] || '',
         email_id: normalizedEmail,
         mobile: null,
-        address: "Not provided",
+        address: 'Not provided',
         publish_on_site: 1,
         skype: null,
         site_name: store_name,
@@ -326,42 +322,42 @@ const CreateUser = [
         nht_website_link: null,
         nht_store_link: null,
         nht_joining_link: null,
-        dns_status: "verified",
+        dns_status: 'verified',
         custom_domain: null,
         dns_verification_txt: null,
         last_verified_at: timestamp,
         created_at: timestamp,
         updated_at: timestamp,
       };
-      await db.insert("tbl_settings", settingsData);
+      await db.insert('tbl_settings', settingsData);
 
-      // Copy products (already validated above)
+      // Copy products
       let productCopyResult = { success: false };
       try {
         console.log(`📦 Copying products for ${country}...`);
         productCopyResult = await copyGlobalProductsToTenant(tenantId, country);
 
         if (!productCopyResult.success) {
-          // Rollback if product copy fails
-          await db.delete("tbl_settings", "tenant_id = ?", [tenantId]);
-          await db.delete("tbl_users", "id = ?", [userId]);
-          await db.delete("tbl_tenants", "id = ?", [tenantId]);
+          // Rollback
+          await db.delete('tbl_settings', 'tenant_id = ?', [tenantId]);
+          await db.delete('tbl_users', 'id = ?', [userId]);
+          await db.delete('tbl_tenants', 'id = ?', [tenantId]);
           
           return res.status(500).json({
-            error: "PRODUCT_COPY_FAILED",
-            message: productCopyResult.error || "Failed to setup products",
+            error: 'PRODUCT_COPY_FAILED',
+            message: productCopyResult.error || 'Failed to setup products',
           });
         }
 
         console.log(`✅ Products copied: ${productCopyResult.products_count} products`);
       } catch (error) {
         // Rollback on error
-        await db.delete("tbl_settings", "tenant_id = ?", [tenantId]);
-        await db.delete("tbl_users", "id = ?", [userId]);
-        await db.delete("tbl_tenants", "id = ?", [tenantId]);
+        await db.delete('tbl_settings', 'tenant_id = ?', [tenantId]);
+        await db.delete('tbl_users', 'id = ?', [userId]);
+        await db.delete('tbl_tenants', 'id = ?', [tenantId]);
         
         return res.status(500).json({
-          error: "SETUP_FAILED",
+          error: 'SETUP_FAILED',
           message: error.message,
         });
       }
@@ -373,7 +369,7 @@ const CreateUser = [
           dnsResult = await addSubdomain(normalizedSubdomain);
         }
       } catch (cfError) {
-        console.error("Cloudflare Error:", cfError.message);
+        console.error('Cloudflare Error:', cfError.message);
       }
 
       // Send welcome email
@@ -385,11 +381,11 @@ const CreateUser = [
           login_url: `${protocol}://${baseDomain}/backoffice-login`,
           store_url: `${protocol}://${fullSubdomain}`,
           subdomain: fullSubdomain,
-          subscription_status: "Active",
+          subscription_status: 'Active',
           subscription_plan,
         });
       } catch (emailError) {
-        console.error("Email failed:", emailError.message);
+        console.error('Email failed:', emailError.message);
       }
 
       res.status(201).json({
@@ -406,11 +402,17 @@ const CreateUser = [
           categories: productCopyResult.categories_count,
           products: productCopyResult.products_count,
         },
-        message: "User created successfully with all products!",
+        message: 'User created successfully with all products!',
       });
     } catch (error) {
-      console.error("CreateUser Error:", error.stack);
-      res.status(500).json({ error: "SERVER_ERROR", message: error.message });
+      console.error('CreateUser Error:', error.stack);
+      if (error.code === 'ER_NO_DEFAULT_FOR_FIELD') {
+        return res.status(500).json({
+          error: 'SERVER_ERROR',
+          message: `Database error: Field '${error.sqlMessage.match(/'[^']+'/)[0]}' requires a value`,
+        });
+      }
+      res.status(500).json({ error: 'SERVER_ERROR', message: error.message });
     }
   },
 ];
