@@ -27,20 +27,29 @@ const Bydomain = async (req, res) => {
     let tenant = null;
     let settings = null;
 
-    // ========== CHECK 2: Subdomain (suryastoree.igrowbig.com) ==========
+    // ========== CHECK 2: Subdomain (pritibeauty.igrowbig.com) ==========
     if (hostname.endsWith(`.${baseDomain}`)) {
       const subdomain = hostname.replace(`.${baseDomain}`, "");
       console.log("🔍 Checking subdomain:", subdomain);
 
+      // Query with FULL subdomain (e.g., pritibeauty.igrowbig.com)
       const fullSubdomain = `${subdomain}.${baseDomain}`;
+      
+      console.log("🔍 Looking for domain:", fullSubdomain);
       
       tenant = await db.selectAll("tbl_tenants", "*", "domain = ?", [fullSubdomain]);
       
       if (tenant.length > 0) {
-        console.log("✅ Tenant found by subdomain:", tenant[0].id);
+        console.log("✅ Tenant found by subdomain:", {
+          id: tenant[0].id,
+          domain: tenant[0].domain,
+          template_id: tenant[0].template_id
+        });
         
         // Get settings for this tenant
         settings = await db.selectAll("tbl_settings", "*", "tenant_id = ?", [tenant[0].id]);
+      } else {
+        console.log("❌ No tenant found for subdomain:", fullSubdomain);
       }
     }
 
@@ -72,6 +81,11 @@ const Bydomain = async (req, res) => {
       return res.status(404).json({
         error: "TENANT_NOT_FOUND",
         message: "No store found for this domain",
+        hostname: hostname,
+        debug: {
+          checked_subdomain: hostname.endsWith(`.${baseDomain}`),
+          checked_custom_domain: true
+        }
       });
     }
 
@@ -83,12 +97,13 @@ const Bydomain = async (req, res) => {
       id: tenantData.id,
       store_name: tenantData.store_name,
       template_id: tenantData.template_id,
+      domain: tenantData.domain
     });
 
     res.status(200).json({
       tenant: {
         id: tenantData.id,
-        template_id: tenantData.template_id || 1,
+        template_id: parseInt(tenantData.template_id) || 1,
         domain: tenantData.domain,
         custom_domain: tenantData.custom_domain || null,
         custom_domain_status: tenantData.custom_domain_status || "pending",
@@ -182,7 +197,7 @@ const getTenantSiteData = async (req, res) => {
       tenant: {
         tenant_id: tenantData.id,
         store_name: tenantData.store_name,
-        template_id: tenantData.template_id || 1,
+        template_id: parseInt(tenantData.template_id) || 1,
         domain: tenantData.domain,
         custom_domain: tenantData.custom_domain,
       },
