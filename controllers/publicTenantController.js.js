@@ -1,183 +1,190 @@
-
-
 const db = require("../config/db");
 
-const getTenantBySlugInternal = async (slug) => {
-  console.log("getTenantBySlugInternal called with slug:", slug);
+/**
+ * Get tenant by domain (subdomain or custom domain)
+ * No slug needed - domain-based only
+ */
+const Bydomain = async (req, res) => {
   try {
-    const tenant = await db.select("tbl_tenants", "*", "slug = ?", [slug]);
-    console.log("Raw db.select result for tbl_tenants:", tenant);
-    if (!tenant || tenant.length === 0) {
-      console.log("No tenant found for slug:", slug);
-      throw new Error("TENANT_NOT_FOUND");
-    }
-    console.log("Returning tenant:", tenant);
-    return tenant;
-  } catch (error) {
-    console.error("Error in getTenantBySlugInternal:", error);
-    throw error;
-  }
-};
+    // Get hostname from request headers
+    let hostname = req.get("Host") || req.get("X-Forwarded-Host") || "";
+    
+    // Remove port if present (localhost:5173 → localhost)
+    hostname = hostname.split(":")[0].toLowerCase();
+    
+    console.log("🔍 Bydomain called with hostname:", hostname);
 
-const getTenantByDomainInternal = async (host) => {
-  console.log("getTenantByDomainInternal called with host:", host);
-  try {
+    // ========== CHECK 1: Main Domain ==========
+    const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
+    if (hostname === baseDomain || hostname === `www.${baseDomain}` || hostname === "localhost") {
+      console.log("❌ Main domain detected, no tenant lookup");
+      return res.status(404).json({
+        error: "MAIN_DOMAIN",
+        message: "This is the main platform domain",
+      });
+    }
+
     let tenant = null;
-    const normalizedHost = host.replace(/^www\./, "").split(":")[0];
-    console.log("Normalized host:", normalizedHost);
+    let settings = null;
 
-    // Allow tenant lookup for localhost in development
-    if (process.env.NODE_ENV === "development" && normalizedHost.includes("localhost")) {
-      // Option 1: Hardcode a tenant for testing
-      tenant = await db.select("tbl_tenants", "*", "slug = ?", ["by-domain"]);
-      // Option 2: Allow domain-based lookup for localhost
-      // tenant = await db.select("tbl_tenants", "*", "domain = ?", [host]);
-    } else if (
-      normalizedHost === "igrowbig.com" 
+    // ========== CHECK 2: Subdomain (suryastoree.igrowbig.com) ==========
+    if (hostname.endsWith(`.${baseDomain}`)) {
+      const subdomain = hostname.replace(`.${baseDomain}`, "");
+      console.log("🔍 Checking subdomain:", subdomain);
+
+      const fullSubdomain = `${subdomain}.${baseDomain}`;
       
-    ) {
-      console.log("Main domain, returning null");
-      return null;
+      tenant = await db.selectAll("tbl_tenants", "*", "domain = ?", [fullSubdomain]);
+      
+      if (tenant.length > 0) {
+        console.log("✅ Tenant found by subdomain:", tenant[0].id);
+        
+        // Get settings for this tenant
+        settings = await db.selectAll("tbl_settings", "*", "tenant_id = ?", [tenant[0].id]);
+      }
     }
 
-    if (!tenant && normalizedHost.endsWith(".igrowbig.com")) {
-      const subdomain = normalizedHost.split(".")[0];
-      tenant = await db.select("tbl_tenants", "*", "domain = ?", [
-        `${subdomain}.igrowbig.com`,
-      ]);
-    } else if (!tenant) {
-      const settings = await db.select(
+    // ========== CHECK 3: Custom Domain (mycustomstore.com) ==========
+    if (!tenant || tenant.length === 0) {
+      console.log("🔍 Checking custom domain:", hostname);
+      
+      settings = await db.selectAll(
         "tbl_settings",
         "*",
         "primary_domain_name = ? AND dns_status = ?",
-        [normalizedHost, "verified"]
+        [hostname, "verified"]
       );
-      if (settings && settings.tenant_id) {
-        tenant = await db.select("tbl_tenants", "*", "id = ?", [
-          settings.tenant_id,
-        ]);
+
+      if (settings.length > 0) {
+        console.log("✅ Settings found for custom domain");
+        
+        tenant = await db.selectAll("tbl_tenants", "*", "id = ?", [settings[0].tenant_id]);
+        
+        if (tenant.length > 0) {
+          console.log("✅ Tenant found by custom domain:", tenant[0].id);
+        }
       }
     }
 
-    console.log("Raw db.select result for tbl_tenants by domain:", tenant);
-    if (!tenant) {
-      console.log("No tenant found for host:", host);
-      throw new Error("TENANT_NOT_FOUND");
+    // ========== CHECK 4: Not Found ==========
+    if (!tenant || tenant.length === 0) {
+      console.log("❌ No tenant found for hostname:", hostname);
+      return res.status(404).json({
+        error: "TENANT_NOT_FOUND",
+        message: "No store found for this domain",
+      });
     }
-    console.log("Returning tenant:", tenant);
-    return tenant;
+
+    // ========== SUCCESS: Return Tenant Data ==========
+    const tenantData = tenant[0];
+    const settingsData = settings && settings.length > 0 ? settings[0] : null;
+
+    console.log("✅ Returning tenant data:", {
+      id: tenantData.id,
+      store_name: tenantData.store_name,
+      template_id: tenantData.template_id,
+    });
+
+    res.status(200).json({
+      tenant: {
+        id: tenantData.id,
+        template_id: tenantData.template_id || 1,
+        domain: tenantData.domain,
+        custom_domain: tenantData.custom_domain || null,
+        custom_domain_status: tenantData.custom_domain_status || "pending",
+        store_name: tenantData.store_name,
+        user_id: tenantData.user_id,
+      },
+      settings: settingsData || {},
+    });
   } catch (error) {
-    console.error("Error in getTenantByDomainInternal:", error);
-    throw error;
+    console.error("❌ Bydomain Error:", error.stack);
+    res.status(500).json({ 
+      error: "SERVER_ERROR", 
+      message: error.message 
+    });
   }
 };
 
+/**
+ * Get full tenant site data (all content)
+ */
 const getTenantSiteData = async (req, res) => {
   try {
-    const { slug } = req.params || {};
-    const host = req.headers.host || "";
-    console.log("getTenantSiteData called with slug:", slug, "and host:", host);
+    let hostname = req.get("Host") || req.get("X-Forwarded-Host") || "";
+    hostname = hostname.split(":")[0].toLowerCase();
+    
+    console.log("🔍 getTenantSiteData called with hostname:", hostname);
+
+    const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
+    
+    // Check if main domain
+    if (hostname === baseDomain || hostname === `www.${baseDomain}` || hostname === "localhost") {
+      return res.status(404).json({
+        error: "MAIN_DOMAIN",
+        message: "This is the main platform domain",
+      });
+    }
 
     let tenant = null;
 
-    if (slug) {
-      try {
-        tenant = await getTenantBySlugInternal(slug);
-      } catch (error) {
-        if (error.message !== "TENANT_NOT_FOUND") {
-          throw error;
-        }
+    // Check subdomain
+    if (hostname.endsWith(`.${baseDomain}`)) {
+      const subdomain = hostname.replace(`.${baseDomain}`, "");
+      const fullSubdomain = `${subdomain}.${baseDomain}`;
+      
+      tenant = await db.selectAll("tbl_tenants", "*", "domain = ?", [fullSubdomain]);
+    }
+
+    // Check custom domain
+    if (!tenant || tenant.length === 0) {
+      const settings = await db.selectAll(
+        "tbl_settings",
+        "*",
+        "primary_domain_name = ? AND dns_status = ?",
+        [hostname, "verified"]
+      );
+
+      if (settings.length > 0) {
+        tenant = await db.selectAll("tbl_tenants", "*", "id = ?", [settings[0].tenant_id]);
       }
     }
 
-    if (!tenant) {
-      try {
-        tenant = await getTenantByDomainInternal(host);
-      } catch (error) {
-        if (error.message === "TENANT_NOT_FOUND") {
-          return res.redirect("http://igrowbig.com");
-        }
-        throw error;
-      }
+    if (!tenant || tenant.length === 0) {
+      console.log("❌ No tenant found for hostname:", hostname);
+      return res.status(404).json({
+        error: "TENANT_NOT_FOUND",
+        message: "No store found for this domain",
+      });
     }
 
-    if (!tenant || !tenant.id) {
-      console.log("Invalid tenant data:", tenant);
-      throw new Error("TENANT_NOT_FOUND");
-    }
+    const tenantData = tenant[0];
+    const tenantId = tenantData.id;
 
-    const tenantId = tenant.id;
-    console.log("Using tenantId:", tenantId);
+    console.log("✅ Fetching site data for tenant:", tenantId);
 
-    const homePage = await db.select("tbl_home_pages", "*", "tenant_id = ?", [
-      tenantId,
-    ]);
-    const categories = await db.selectAll(
-      "tbl_categories",
-      "*",
-      "tenant_id = ?",
-      [tenantId]
-    );
-    const products = await db.selectAll("tbl_products", "*", "tenant_id = ?", [
-      tenantId,
-    ]);
-    const productpage = await db.select("tbl_product_page", "*", "tenant_id = ?", [
-      tenantId,
-    ]);
-    const opportunityPage = await db.select(
-      "tbl_opportunity_page",
-      "*",
-      "tenant_id = ?",
-      [tenantId]
-    );
-    const joinUsPage = await db.select("tbl_joinus_page", "*", "tenant_id = ?", [
-      tenantId,
-    ]);
-    const contactUs = await db.select("tbl_contactus_page", "*", "tenant_id = ?", [
-      tenantId,
-    ]);
-    const blogs = await db.selectAll("tbl_blogs", "*", "tenant_id = ?", [
-      tenantId,
-    ]);
-    const blogBanners = await db.selectAll(
-      "tbl_blog_page_banners",
-      "*",
-      "tenant_id = ?",
-      [tenantId]
-    );
-    const footerDisclaimers = await db.selectAll(
-      "tbl_footer_disclaimers",
-      "*",
-      "tenant_id = ?",
-      [tenantId]
-    );
-    const footerSocialLinks = await db.selectAll(
-      "tbl_footer_social_links",
-      "*",
-      "tenant_id = ?",
-      [tenantId]
-    );
-    const sliderBanners = await db.selectAll(
-      "tbl_slider_banners",
-      "*",
-      "tenant_id = ?",
-      [tenantId]
-    );
-    const tenantSetting = await db.selectAll(
-      "tbl_settings",
-      "*",
-      "tenant_id = ?",
-      [tenantId]
-    );
+    // Fetch all site data
+    const [homePage] = await db.selectAll("tbl_home_pages", "*", "tenant_id = ?", [tenantId]);
+    const categories = await db.selectAll("tbl_categories", "*", "tenant_id = ?", [tenantId]);
+    const products = await db.selectAll("tbl_products", "*", "tenant_id = ?", [tenantId]);
+    const [productpage] = await db.selectAll("tbl_product_page", "*", "tenant_id = ?", [tenantId]);
+    const [opportunityPage] = await db.selectAll("tbl_opportunity_page", "*", "tenant_id = ?", [tenantId]);
+    const [joinUsPage] = await db.selectAll("tbl_joinus_page", "*", "tenant_id = ?", [tenantId]);
+    const [contactUs] = await db.selectAll("tbl_contactus_page", "*", "tenant_id = ?", [tenantId]);
+    const blogs = await db.selectAll("tbl_blogs", "*", "tenant_id = ?", [tenantId]);
+    const blogBanners = await db.selectAll("tbl_blog_page_banners", "*", "tenant_id = ?", [tenantId]);
+    const footerDisclaimers = await db.selectAll("tbl_footer_disclaimers", "*", "tenant_id = ?", [tenantId]);
+    const footerSocialLinks = await db.selectAll("tbl_footer_social_links", "*", "tenant_id = ?", [tenantId]);
+    const sliderBanners = await db.selectAll("tbl_slider_banners", "*", "tenant_id = ?", [tenantId]);
+    const [tenantSetting] = await db.selectAll("tbl_settings", "*", "tenant_id = ?", [tenantId]);
 
-    res.json({
+    res.status(200).json({
       tenant: {
-        tenant_id: tenant.id,
-        store_name: tenant.store_name,
-        template_id: tenant.template_id || 1,
-        slug: tenant.slug,
-        site_title: tenant.site_title,
-        domain: tenant.domain,
+        tenant_id: tenantData.id,
+        store_name: tenantData.store_name,
+        template_id: tenantData.template_id || 1,
+        domain: tenantData.domain,
+        custom_domain: tenantData.custom_domain,
       },
       site_data: {
         home: homePage || {},
@@ -192,399 +199,19 @@ const getTenantSiteData = async (req, res) => {
         footer_disclaimers: footerDisclaimers || [],
         footer_social_links: footerSocialLinks || [],
         slider_banners: sliderBanners || [],
-        tenant_Setting: tenantSetting || [],
+        tenant_setting: tenantSetting || {},
       },
     });
   } catch (error) {
-    console.error("Error in getTenantSiteData:", error);
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.redirect("http://begrat.com");
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-const Bydomain = async (req, res) => {
-  try {
-    const hostname = req.get("Host");
-    console.log("Fetching tenant for domain:", hostname);
-
-    const settings = await db.selectAll(
-      "tbl_settings",
-      "*",
-      "primary_domain_name = ? AND dns_status = ?",
-      [hostname, "verified"]
-    );
-
-    if (settings.length === 0) {
-      return res.status(404).json({
-        error: "TENANT_NOT_FOUND",
-        message: "No tenant found for this domain",
-      });
-    }
-
-    const tenant = await db.selectAll(
-      "tbl_tenants",
-      "*",
-      "id = ?",
-      [settings[0].tenant_id]
-    );
-
-    if (tenant.length === 0) {
-      return res.status(404).json({
-        error: "TENANT_NOT_FOUND",
-        message: "Tenant record not found",
-      });
-    }
-
-    res.status(200).json({
-      tenant: {
-        id: tenant[0].id,
-        slug: tenant[0].slug,
-        template_id: tenant[0].template_id,
-        domain: tenant[0].domain,
-        store_name: tenant[0].store_name,
-      },
-      settings: settings[0],
+    console.error("❌ getTenantSiteData Error:", error.stack);
+    res.status(500).json({ 
+      error: "SERVER_ERROR", 
+      message: error.message 
     });
-  } catch (error) {
-    console.error("SiteByDomain Error:", error.stack);
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-
-
-
-// Get product page by slug
-const getProductPageBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const [productPage] = await db.select(
-      "tbl_product_page",
-      "*",
-      "tenant_id = ?",
-      [tenant.id]
-    );
-    res.json({
-      template_id: tenant.template_id,
-      product_page: productPage || {},
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get opportunity page by slug
-const getOpportunityPageBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const [opportunityPage] = await db.select(
-      "tbl_opportunity_page",
-      "*",
-      "tenant_id = ?",
-      [tenant.id]
-    );
-    res.json({
-      template_id: tenant.template_id,
-      opportunity: opportunityPage || {},
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get join-us page by slug
-const getJoinUsPageBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const [joinUsPage] = await db.select(
-      "tbl_joinus_page",
-      "*",
-      "tenant_id = ?",
-      [tenant.id]
-    );
-    res.json({
-      template_id: tenant.template_id,
-      join_us: joinUsPage || {},
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get contact-us page by slug
-const getAllContactUsBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const [contactUs] = await db.select("tbl_contactus", "*", "tenant_id = ?", [
-      tenant.id,
-    ]);
-    res.json({
-      template_id: tenant.template_id,
-      contact: contactUs || {},
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get products by slug
-const getProductsBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const products = await db.select("tbl_products", "*", "tenant_id = ?", [
-      tenant.id,
-    ]);
-    res.json({
-      template_id: tenant.template_id,
-      products: products || [],
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get categories by slug
-const getCategoriesBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const categories = await db.select("tbl_categories", "*", "tenant_id = ?", [
-      tenant.id,
-    ]);
-    res.json({
-      template_id: tenant.template_id,
-      categories: categories || [],
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get blogs by slug
-const getBlogsBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const blogs = await db.select("tbl_blogs", "*", "tenant_id = ?", [
-      tenant.id,
-    ]);
-    res.json({
-      template_id: tenant.template_id,
-      blog: blogs || [],
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get footer social links by slug
-const getSocialLinksBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const socialLinks = await db.select(
-      "tbl_social_links",
-      "*",
-      "tenant_id = ?",
-      [tenant.id]
-    );
-    res.json({
-      template_id: tenant.template_id,
-      social_links: socialLinks || [],
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get footer disclaimers by slug
-const getDisclaimersBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const disclaimers = await db.select(
-      "tbl_disclaimers",
-      "*",
-      "tenant_id = ?",
-      [tenant.id]
-    );
-    res.json({
-      template_id: tenant.template_id,
-      disclaimers: disclaimers || [],
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get about product page by slug
-const getAboutProductPageBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const [aboutProductPage] = await db.select(
-      "tbl_about_product_page",
-      "*",
-      "tenant_id = ?",
-      [tenant.id]
-    );
-    res.json({
-      template_id: tenant.template_id,
-      about_product: aboutProductPage || {},
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get home page by slug
-const getHomePageBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const [homePage] = await db.select("tbl_home_page", "*", "tenant_id = ?", [
-      tenant.id,
-    ]);
-    res.json({
-      template_id: tenant.template_id,
-      home: homePage || {},
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get slider banners by slug
-const getSliderBannersBySlug = async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const sliderBanners = await db.select(
-      "tbl_slider_banners",
-      "*",
-      "tenant_id = ?",
-      [tenant.id]
-    );
-    res.json({
-      template_id: tenant.template_id,
-      slider_banners: sliderBanners || [],
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get single product by slug and product ID
-const getProductBySlug = async (req, res) => {
-  try {
-    const { slug, id } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const [product] = await db.select(
-      "tbl_products",
-      "*",
-      "tenant_id = ? AND id = ?",
-      [tenant.id, id]
-    );
-    if (!product) {
-      return res.status(404).json({ error: "PRODUCT_NOT_FOUND" });
-    }
-    res.json({
-      template_id: tenant.template_id,
-      product,
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
-  }
-};
-
-// Get single blog by slug and blog ID
-const getBlogBySlug = async (req, res) => {
-  try {
-    const { slug, id } = req.params;
-    const tenant = await getTenantBySlugInternal(slug);
-    const [blog] = await db.select(
-      "tbl_blogs",
-      "*",
-      "tenant_id = ? AND id = ?",
-      [tenant.id, id]
-    );
-    if (!blog) {
-      return res.status(404).json({ error: "BLOG_NOT_FOUND" });
-    }
-    res.json({
-      template_id: tenant.template_id,
-      blog,
-    });
-  } catch (error) {
-    if (error.message === "TENANT_NOT_FOUND") {
-      return res.status(404).json({ error: "TENANT_NOT_FOUND" });
-    }
-    res.status(500).json({ error: "SERVER_ERROR", message: error.message });
   }
 };
 
 module.exports = {
-  getTenantBySlugInternal, // Export for potential reuse
+  Bydomain,
   getTenantSiteData,
-  getProductPageBySlug,
-  getOpportunityPageBySlug,
-  getJoinUsPageBySlug,
-  getAllContactUsBySlug,
-  getProductsBySlug,
-  getProductBySlug,
-  getCategoriesBySlug,
-  getBlogsBySlug,
-  getBlogBySlug,
-  getSocialLinksBySlug,
-  getDisclaimersBySlug,
-  getAboutProductPageBySlug,
-  getHomePageBySlug,
-  getSliderBannersBySlug,
-  Bydomain
 };

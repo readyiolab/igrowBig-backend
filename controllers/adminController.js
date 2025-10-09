@@ -285,6 +285,7 @@ const CreateUser = [
         custom_domain: null,
         custom_domain_status: "pending",
         plan: subscription_plan, // Add the plan field using subscription_plan
+        country,
         created_at: timestamp,
         updated_at: timestamp,
       };
