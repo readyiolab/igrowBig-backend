@@ -276,7 +276,7 @@ const CreateUser = [
       });
       const hashedPassword = await bcrypt.hash(generatedPassword, 10);
 
-      // Insert tenant
+      // Insert tenant with plan field
       const tenantData = {
         store_name,
         template_id,
@@ -284,6 +284,7 @@ const CreateUser = [
         domain: fullSubdomain,
         custom_domain: null,
         custom_domain_status: "pending",
+        plan: subscription_plan, // Add the plan field using subscription_plan
         created_at: timestamp,
         updated_at: timestamp,
       };
@@ -336,7 +337,7 @@ const CreateUser = [
       };
       await db.insert("tbl_settings", settingsData);
 
-      // Copy products (already validated above)
+      // Copy products
       let productCopyResult = { success: false };
       try {
         console.log(`📦 Copying products for ${country}...`);
