@@ -37,15 +37,12 @@ const AddProductPage = async (req, res) => {
     const { tenantId } = req.params;
     const { banner_content, about_description, video_section_link } = req.body;
 
-    console.log("Request body:", req.body);
-    console.log("File:", req.file);
-
     if (!checkTenantAuth(req, tenantId)) {
       return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
     }
 
     try {
-      const folder = `product-pages/tenant_${tenantId}`;
+      const folder = `tenant_${tenantId}/product-pages`;
       let bannerImageUrl = null;
       if (req.file) {
         bannerImageUrl = await uploadToS3(req.file, folder);

@@ -59,7 +59,7 @@ const UpdateAboutProductPage = async (req, res) => {
         });
       }
 
-      const folder = `about-product/${tenantId}`;
+      const folder = `tenant_${tenantId}/about-product`;
       const updateData = {
         banner_content: banner_content || null,
         about_products: about_products || null,

@@ -120,19 +120,18 @@ const AddHomePage = async (req, res) => {
         support_content,
       };
 
-      // Handle file uploads to S3
       if (req.files) {
         if (req.files.introduction_image) {
           const file = req.files.introduction_image[0];
-          homePageData.introduction_image_url = await uploadToS3(file, "homepage_introduction");
+          homePageData.introduction_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_introduction`);
         }
         if (req.files.about_company_image) {
           const file = req.files.about_company_image[0];
-          homePageData.about_company_image_url = await uploadToS3(file, "homepage_about");
+          homePageData.about_company_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
         }
         if (req.files.opportunity_video) {
           const file = req.files.opportunity_video[0];
-          homePageData.opportunity_video_url = await uploadToS3(file, "homepage_opportunity");
+          homePageData.opportunity_video_url = await uploadToS3(file, `tenant_${tenantId}/homepage_opportunity`);
         }
       }
 
@@ -166,86 +165,68 @@ const UpdateHomePage = async (req, res) => {
       support_content,
     } = req.body;
 
-    console.log("Request Headers:", req.headers);
-    console.log("Tenant ID:", tenantId);
     if (!checkTenantAuth(req, tenantId)) {
-      console.log("checkTenantAuth failed");
       return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
     }
 
     try {
       const existingPage = await db.select("tbl_home_pages", "*", `tenant_id = ${tenantId}`);
+      if (!existingPage) {
+        return res.status(404).json({ error: "PAGE_NOT_FOUND", message: "Home page not found" });
+      }
+
       const homePageData = {
-        welcome_description: welcome_description || existingPage?.welcome_description || "Default welcome",
-        introduction_content: introduction_content || existingPage?.introduction_content || "Default introduction",
-        about_company_title: about_company_title || existingPage?.about_company_title || "About Us",
-        about_company_content_1: about_company_content_1 || existingPage?.about_company_content_1 || "Default content",
-        about_company_content_2: about_company_content_2 || existingPage?.about_company_content_2 || null,
-        why_network_marketing_title: why_network_marketing_title || existingPage?.why_network_marketing_title || "Why Network Marketing",
-        why_network_marketing_content: why_network_marketing_content || existingPage?.why_network_marketing_content || "Default why content",
-        opportunity_video_header_title: opportunity_video_header_title || existingPage?.opportunity_video_header_title || "Opportunity Video",
-        opportunity_video_url: youtube_link || existingPage?.opportunity_video_url || null,
-        support_content: support_content || existingPage?.support_content || "Default support",
+        welcome_description: welcome_description || existingPage.welcome_description,
+        introduction_content: introduction_content || existingPage.introduction_content,
+        about_company_title: about_company_title || existingPage.about_company_title,
+        about_company_content_1: about_company_content_1 || existingPage.about_company_content_1,
+        about_company_content_2: about_company_content_2 || existingPage.about_company_content_2 || null,
+        why_network_marketing_title: why_network_marketing_title || existingPage.why_network_marketing_title,
+        why_network_marketing_content: why_network_marketing_content || existingPage.why_network_marketing_content,
+        opportunity_video_header_title: opportunity_video_header_title || existingPage.opportunity_video_header_title,
+        opportunity_video_url: youtube_link || existingPage.opportunity_video_url || null,
+        support_content: support_content || existingPage.support_content,
       };
 
-      // Handle file uploads to S3 and delete old files if replaced
       if (req.files) {
         if (req.files.introduction_image) {
           const file = req.files.introduction_image[0];
-          if (existingPage?.introduction_image_url) {
+          if (existingPage.introduction_image_url) {
             await deleteFromS3(existingPage.introduction_image_url);
           }
-          homePageData.introduction_image_url = await uploadToS3(file, "homepage_introduction");
+          homePageData.introduction_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_introduction`);
+          safeUnlink(file.path);
         }
         if (req.files.about_company_image) {
           const file = req.files.about_company_image[0];
-          if (existingPage?.about_company_image_url) {
+          if (existingPage.about_company_image_url) {
             await deleteFromS3(existingPage.about_company_image_url);
           }
-          homePageData.about_company_image_url = await uploadToS3(file, "homepage_about");
+          homePageData.about_company_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
+          safeUnlink(file.path);
         }
         if (req.files.opportunity_video) {
           const file = req.files.opportunity_video[0];
-          if (existingPage?.opportunity_video_url && !youtube_link) {
+          if (existingPage.opportunity_video_url && !youtube_link && !existingPage.opportunity_video_url.includes("youtube")) {
             await deleteFromS3(existingPage.opportunity_video_url);
           }
-          homePageData.opportunity_video_url = await uploadToS3(file, "homepage_opportunity");
+          homePageData.opportunity_video_url = await uploadToS3(file, `tenant_${tenantId}/homepage_opportunity`);
+          safeUnlink(file.path);
         }
       }
 
-      if (existingPage) {
-        await db.update("tbl_home_pages", homePageData, `tenant_id = ${tenantId}`);
-        res.json({ message: "Home page updated", data: homePageData });
-      } else {
-        homePageData.tenant_id = tenantId;
-        const result = await db.insert("tbl_home_pages", homePageData);
-        res.status(201).json({ message: "Home page created", page_id: result.insert_id });
+      if (Object.keys(homePageData).length === 0) {
+        return res.status(400).json({ error: "NO_DATA", message: "No data provided to update" });
       }
+
+      await db.update("tbl_home_pages", homePageData, `tenant_id = ${tenantId}`);
+      res.json({ message: "Home page updated", data: homePageData });
     } catch (err) {
       console.error("Error in UpdateHomePage:", err);
       res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
     }
   });
 };
-
-// Get Home Page
-// const GetHomePage = async (req, res) => {
-//   const { tenantId } = req.params;
-//   if (!checkTenantAuth(req, tenantId)) {
-//     return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
-//   }
-
-//   try {
-//     const page = await db.select("tbl_home_pages", "*", `tenant_id = ${tenantId}`);
-//     if (!page) {
-//       return res.status(404).json({ error: "PAGE_NOT_FOUND", message: "Home page not found" });
-//     }
-//     res.json(page);
-//   } catch (err) {
-//     console.error("Error in GetHomePage:", err);
-//     res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
-//   }
-// };
 
 // Get Home Page
 const GetHomePage = async (req, res) => {

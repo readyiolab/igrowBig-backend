@@ -50,7 +50,7 @@ const AddBlog = async (req, res) => {
     try {
       let imageUrl = null;
       if (req.file) {
-        imageUrl = await uploadToS3(req.file, `blogs/${tenantId}`);
+        imageUrl = await uploadToS3(req.file, `tenant_${tenantId}/blogs`);
       }
 
       const blogData = {
@@ -70,7 +70,6 @@ const AddBlog = async (req, res) => {
     }
   });
 };
-
 // Get Blogs (tbl_blogs) with associated banners (tbl_blog_page_banners)
 const GetBlogs = async (req, res) => {
   const { tenantId } = req.params;

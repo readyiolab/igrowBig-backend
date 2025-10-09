@@ -39,9 +39,6 @@ const AddCategory = async (req, res) => {
     const tenantId = parseInt(req.params.tenantId, 10);
     const { name, description, status } = req.body;
 
-    console.log("Parsed Tenant ID:", tenantId);
-
-    // Validate tenant ID
     if (isNaN(tenantId)) {
       return res.status(400).json({
         error: "INVALID_TENANT_ID",
@@ -54,7 +51,6 @@ const AddCategory = async (req, res) => {
     }
 
     try {
-      // Explicit tenant existence check
       const tenantCheck = await db.select("tbl_tenants", "*", `id = ${tenantId}`);
       if (!tenantCheck) {
         return res.status(404).json({
@@ -70,17 +66,13 @@ const AddCategory = async (req, res) => {
         });
       }
 
-      // Prepare folder name dynamically
       const safeName = name.replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
-      const folder = `categories/${safeName}_${tenantId}`;
+      const folder = `tenant_${tenantId}/categories/${safeName}`;
 
-      // Upload to S3 if file exists
       let imageUrl = null;
       if (req.file) {
         imageUrl = await uploadToS3(req.file, folder);
-        // Clean up temporary file
-        const tempFilePath = req.file.path;
-        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+        safeUnlink(req.file.path);
       }
 
       const categoryData = {
@@ -91,10 +83,7 @@ const AddCategory = async (req, res) => {
         status: status ? status.toLowerCase() : "active",
       };
 
-      console.log("Prepared Category Data:", categoryData);
-
       const result = await db.insert("tbl_categories", categoryData);
-
       res.status(201).json({ message: "Category added", category_id: result.insert_id });
     } catch (err) {
       console.error("Detailed Error:", err);

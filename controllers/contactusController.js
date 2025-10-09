@@ -51,14 +51,9 @@ const AddContactUs = async (req, res) => {
         return res.status(400).json({ error: "MISSING_TEXT", message: "Contact Us text is required" });
       }
 
-      // Dynamic folder name for S3
-      const folder = `contactus/tenant_${tenantId}`;
-
-      // Upload image to S3
+      const folder = `tenant_${tenantId}/contactus`;
       const imageUrl = await uploadToS3(req.file, folder);
-      // Clean up temporary file
-      const tempFilePath = req.file.path;
-      if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+      safeUnlink(req.file.path);
 
       const contactUsData = {
         tenant_id: tenantId,
@@ -93,29 +88,22 @@ const UpdateContactUs = async (req, res) => {
 
     try {
       const existingContactUs = await db.select("tbl_contactus_page", "*", `id = ${id} AND tenant_id = ${tenantId}`);
-
       if (!existingContactUs) {
         return res.status(404).json({ error: "CONTACTUS_NOT_FOUND", message: "Contact Us not found" });
       }
 
-      console.log("Existing ContactUs Data:", existingContactUs);
-
-      const folder = `contactus/tenant_${tenantId}`;
       const updateData = {};
-
       if (contactus_text) updateData.contactus_text = contactus_text;
 
       if (req.file) {
         // Delete old image from S3 if it exists
-        const existingImage = existingContactUs.contactus_image; // FIXED: Direct access
-        if (existingImage) {
-          await deleteFromS3(existingImage);
+        if (existingContactUs.contactus_image) {
+          await deleteFromS3(existingContactUs.contactus_image);
         }
         // Upload new image to S3
+        const folder = `tenant_${tenantId}/contactus`;
         updateData.contactus_image = await uploadToS3(req.file, folder);
-        // Clean up temporary file
-        const tempFilePath = req.file.path;
-        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+        safeUnlink(req.file.path);
       }
 
       if (Object.keys(updateData).length === 0) {
@@ -125,7 +113,7 @@ const UpdateContactUs = async (req, res) => {
       await db.update("tbl_contactus_page", updateData, `id = ${id} AND tenant_id = ${tenantId}`);
       res.json({ message: "Contact Us updated" });
     } catch (err) {
-      console.error(err);
+      console.error("Error in UpdateContactUs:", err);
       res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
     }
   });

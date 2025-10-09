@@ -69,21 +69,9 @@ const AddOrUpdateOpportunityPage = async (req, res) => {
     }
 
     try {
-      const folder = `opportunity/tenant_${tenantId}`;
-      // Fetch existing page, handle non-array or null result
+      const folder = `tenant_${tenantId}/opportunity`;
       const result = await db.select("tbl_opportunity_page", "*", `tenant_id = ${tenantId}`);
       const existingPage = Array.isArray(result) ? result[0] : result || null;
-
-      // Helper function to safely delete local file
-      const safeUnlink = (filePath) => {
-        try {
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-        } catch (unlinkErr) {
-          console.warn(`Failed to delete file ${filePath}: ${unlinkErr.message}`);
-        }
-      };
 
       let bannerImageUrl = existingPage?.banner_image_url || null;
       if (req.files?.["banner_image"]) {
@@ -115,7 +103,6 @@ const AddOrUpdateOpportunityPage = async (req, res) => {
         safeUnlink(req.files["plan_document"][0].path);
       }
 
-      // If update_type is plan_document_only, only update the plan document
       if (update_type === "plan_document_only") {
         if (!existingPage) {
           const pageData = { tenant_id: tenantId, plan_document_url: planDocumentUrl };
@@ -130,7 +117,6 @@ const AddOrUpdateOpportunityPage = async (req, res) => {
         return res.status(200).json({ message: "Plan document updated" });
       }
 
-      // Full page update or creation
       const pageData = {
         tenant_id: tenantId,
         banner_image_url: bannerImageUrl,

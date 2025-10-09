@@ -6,7 +6,7 @@ const { smtpHost, smtpPort, smtpUser, smtpPass } = require("../config/dotenvConf
 const transporter = nodemailer.createTransport({
     host: smtpHost,
     port: smtpPort,
-    secure: true, // Use SSL
+    secure: false, // Use SSL
     auth: {
       user: smtpUser,
       pass: smtpPass,
@@ -196,23 +196,66 @@ const sendPasswordResetEmail = async (
   });
 };
 
-const sendDomainNotification = async (email, domain, status) => {
-    const statusMessages = {
-      verified: `Your domain ${domain} is active! 🎉`,
-      unverified: `Please configure your DNS for ${domain} to point to ${process.env.SERVER_IP}.`,
-      error: `We encountered an issue verifying ${domain}. Please check your DNS settings.`,
-      pending: `Your domain ${domain} is being verified. We'll notify you soon.`,
-    };
-  
-    await transporter.sendMail({
-      from: '"Begrat Support" <hello@arbilo.com>',
-      to: email,
-      subject: `Domain ${domain} Status Update`,
-      text: statusMessages[status] || 'Domain status updated.',
-      html: `<p>${statusMessages[status]}</p>`,
-    });
+const sendDomainNotification = async (email, domain, status, instructions = null) => {
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    console.warn(`⚠️ Invalid or missing email for domain notification: ${domain}. Skipping email.`);
+    return;
+  }
+
+  const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
+  const serverIP = process.env.SERVER_IP || "82.29.160.167";
+  const statusMessages = {
+    pending: `Your domain ${domain} is being verified. Follow the DNS setup instructions below. ⏳`,
+    verified: `Great news! Your domain ${domain} is verified and active! 🎉 Visit https://${domain} to see your store.`,
+    unverified: `We couldn't verify ${domain}. Check your DNS settings and try again. ❌`,
   };
 
+  const dnsInstructions = instructions ? `
+    <h3>DNS Setup Instructions for ${domain}</h3>
+    <p><strong>Step 1: Verify Domain Ownership (TXT Record)</strong></p>
+    <ul>
+      <li>Type: TXT</li>
+      <li>Host: _igrowbig-verification.${domain}</li>
+      <li>Value: ${instructions.step1.value}</li>
+      <li>TTL: Automatic or 3600</li>
+      <li>Description: Add this to your DNS provider to prove ownership. Wait 1-5 minutes.</li>
+    </ul>
+    <p><strong>Step 2: Point Domain (CNAME - Recommended)</strong></p>
+    <ul>
+      <li>Type: CNAME</li>
+      <li>Host: ${domain}</li>
+      <li>Value: ${baseDomain}</li>
+      <li>TTL: Automatic or 3600</li>
+      <li>Description: Routes traffic to our servers.</li>
+    </ul>
+    <p><strong>Step 3: Alternative (A Record)</strong></p>
+    <ul>
+      <li>Type: A</li>
+      <li>Host: ${domain}</li>
+      <li>Value: ${serverIP}</li>
+      <li>TTL: Automatic or 3600</li>
+      <li>Description: Use if CNAME doesn't work.</li>
+    </ul>
+    <p><strong>Notes:</strong> DNS changes may take 48 hours to propagate. Contact support@arbilo.com for help.</p>
+  ` : '';
+
+  const htmlContent = `
+    <div style="${emailStyles}">
+      <h2>Domain Update for ${domain}</h2>
+      <p>${statusMessages[status] || 'Domain status updated.'}</p>
+      ${status === 'verified' ? `<p>Your store is live at <a href="https://${domain}">https://${domain}</a>!</p>` : ''}
+      ${dnsInstructions}
+      <p>Regards,<br>iGrow Big Team</p>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: '"iGrow Big" <hello@arbilo.com>',
+    to: email,
+    subject: `Domain ${domain} ${status.charAt(0).toUpperCase() + status.slice(1)}`,
+    html: htmlContent,
+  });
+};
 module.exports = {
   transporter,
   sendWelcomeEmail,

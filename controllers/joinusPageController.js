@@ -62,7 +62,7 @@ const AddOrUpdateJoinUsPage = async (req, res) => {
       const existingPageResult = await db.select("tbl_joinus_page", "*", `tenant_id = ${tenantId}`);
       const existingPage = Array.isArray(existingPageResult) ? existingPageResult[0] : existingPageResult;
 
-      const folder = `joinus/tenant_${tenantId}`;
+      const folder = `tenant_${tenantId}/joinus`;
       let joinusImageBannerUrl = existingPage?.joinus_image_banner_url || null;
 
       if (req.file) {
@@ -70,7 +70,7 @@ const AddOrUpdateJoinUsPage = async (req, res) => {
           await deleteFromS3(existingPage.joinus_image_banner_url);
         }
         joinusImageBannerUrl = await uploadToS3(req.file, folder);
-        await safeUnlink(req.file.path);
+        safeUnlink(req.file.path);
       }
 
       const pageData = {

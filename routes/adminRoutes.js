@@ -1,8 +1,17 @@
 const express = require("express");
 const router = express.Router();
+// At the top of adminRoutes.js
+const { debugDNS, manualVerifyDomain } = require('../services/cloudflareService'); // or wherever you put the functions
+
 const { AdminSignup, AdminLogin, CreateUser, ResetUserPassword, SendTenantNotification,GetAllTenantUsers,GetAllTenantMessages,GetTenantSettings,UpdateTenantSettings, UpdateUserStatus, CreateCategory, GetAllCategories, UpdateCategory, DeleteCategory, CreateTraining, GetAllTrainings, UpdateTraining, DeleteTraining, AdminchangePassword,DeleteTenantLogo, GetDomainLogs } = require("../controllers/adminController");
 const { authenticateAdmin } = require("../middleware/authMiddleware");
 
+
+
+// Add these routes
+
+router.post('/verify-domain/:tenantId', manualVerifyDomain);
+router.get('/debug-dns/:subdomain', debugDNS);
 router.post("/signup", AdminSignup);
 router.post("/login", AdminLogin);
 router.put("/admin-change-password", authenticateAdmin, AdminchangePassword);
