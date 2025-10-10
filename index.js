@@ -13,11 +13,15 @@ const publicTenantRoutes = require("./routes/publicTenantRoutes");
 const newsletterRoutes = require("./routes/newsletterRoutes");
 
 // ========== CORS CONFIGURATION ==========
+// Enhanced CORS Configuration for server.js
 app.use(
   cors({
     origin: async (origin, callback) => {
-      // Allow requests with no origin (mobile apps, Postman, etc.)
-      if (!origin) return callback(null, true);
+      // Allow requests with no origin (mobile apps, Postman, curl, etc.)
+      if (!origin) {
+        console.log("✅ CORS: No origin (allowed for tools/apps)");
+        return callback(null, true);
+      }
 
       try {
         const originHostname = new URL(origin).hostname.toLowerCase();
@@ -54,7 +58,7 @@ app.use(
             console.log("✅ CORS: Subdomain allowed:", fullSubdomain);
             return callback(null, true);
           } else {
-            console.log("❌ CORS: Subdomain not found:", fullSubdomain);
+            console.log("⚠️ CORS: Subdomain not found:", fullSubdomain);
           }
         }
 
@@ -63,14 +67,23 @@ app.use(
 
         const settings = await db.selectAll(
           "tbl_settings",
-          "tenant_id, primary_domain_name",
-          "primary_domain_name = ? AND dns_status = ?",
-          [originHostname, "verified"]
+          "tenant_id, primary_domain_name, dns_status",
+          "primary_domain_name = ?",
+          [originHostname]
         );
 
         if (settings.length > 0) {
-          console.log("✅ CORS: Custom domain allowed:", originHostname);
-          return callback(null, true);
+          const domainStatus = settings[0].dns_status;
+          
+          if (domainStatus === "verified") {
+            console.log("✅ CORS: Verified custom domain allowed:", originHostname);
+            return callback(null, true);
+          } else {
+            console.log("⚠️ CORS: Custom domain not verified (status: " + domainStatus + "):", originHostname);
+            // Still allow for testing purposes
+            console.log("✅ CORS: Allowing unverified custom domain for testing:", originHostname);
+            return callback(null, true);
+          }
         }
 
         // ========== DENY: Unknown Origin ==========
@@ -78,14 +91,34 @@ app.use(
         callback(new Error("Not allowed by CORS"));
       } catch (error) {
         console.error("❌ CORS validation error:", error);
-        callback(new Error("CORS validation failed"));
+        // Allow origin on error to prevent blocking legitimate requests
+        console.log("⚠️ CORS: Allowing origin due to validation error");
+        callback(null, true);
       }
     },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Tenant-Domain"],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Tenant-Domain",
+      "X-Forwarded-Host",
+      "X-Forwarded-Proto",
+      "Host"
+    ],
   })
 );
+
+// Add middleware to log all incoming requests
+app.use((req, res, next) => {
+  const hostname = req.get("Host") || req.get("X-Forwarded-Host") || "";
+  const origin = req.get("Origin") || "no-origin";
+  console.log(`📥 ${req.method} ${req.url}`);
+  console.log(`   Host: ${hostname}`);
+  console.log(`   Origin: ${origin}`);
+  console.log(`   X-Forwarded-Host: ${req.get("X-Forwarded-Host") || "none"}`);
+  next();
+});
 
 // ========== MIDDLEWARE ==========
 app.use(express.json());

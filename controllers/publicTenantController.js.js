@@ -1,230 +1,192 @@
 const db = require("../config/db");
 
 /**
- * Get tenant by domain (subdomain or custom domain)
- * No slug needed - domain-based only
+ * ✅ PRIMARY: Get tenant by ANY domain (subdomain or custom domain)
+ * This checks both tbl_tenants.domain AND tbl_settings.primary_domain_name
  */
-const Bydomain = async (req, res) => {
+async function Bydomain(req, res) {
   try {
-    // Get hostname from request headers
-    let hostname = req.get("Host") || req.get("X-Forwarded-Host") || "";
+    // Get the requesting hostname
+    const hostname = req.get("host")?.toLowerCase() || req.get("x-forwarded-host")?.toLowerCase();
     
-    // Remove port if present (localhost:5173 → localhost)
-    hostname = hostname.split(":")[0].toLowerCase();
-    
-    console.log("🔍 Bydomain called with hostname:", hostname);
+    if (!hostname) {
+      return res.status(400).json({
+        error: "MISSING_HOSTNAME",
+        message: "Could not determine hostname from request",
+      });
+    }
 
-    // ========== CHECK 1: Main Domain ==========
+    console.log(`🔍 [Bydomain] Incoming request for hostname: ${hostname}`);
+
     const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
-    if (hostname === baseDomain || hostname === `www.${baseDomain}` || hostname === "localhost") {
-      console.log("❌ Main domain detected, no tenant lookup");
-      return res.status(404).json({
+    
+    // Remove port if present (for localhost:3000)
+    const cleanHostname = hostname.split(':')[0];
+
+    // ========== CHECK 1: Main Domain (Landing Page) ==========
+    const isMainDomain = [
+      baseDomain,
+      `www.${baseDomain}`,
+      "localhost"
+    ].includes(cleanHostname);
+
+    if (isMainDomain) {
+      return res.status(400).json({
         error: "MAIN_DOMAIN",
-        message: "This is the main platform domain",
+        message: "This is the main domain, not a tenant site",
       });
     }
 
     let tenant = null;
-    let settings = null;
+    let matchType = null;
 
-    // ========== CHECK 2: Subdomain (pritibeauty.igrowbig.com) ==========
-    if (hostname.endsWith(`.${baseDomain}`)) {
-      const subdomain = hostname.replace(`.${baseDomain}`, "");
-      console.log("🔍 Checking subdomain:", subdomain);
+    // ========== CHECK 2: Subdomain (e.g., shop.igrowbig.com) ==========
+    if (cleanHostname.endsWith(`.${baseDomain}`)) {
+      const subdomain = cleanHostname.replace(`.${baseDomain}`, "");
+      console.log(`🔍 [Bydomain] Checking subdomain: ${subdomain}`);
 
-      // Query with FULL subdomain (e.g., pritibeauty.igrowbig.com)
-      const fullSubdomain = `${subdomain}.${baseDomain}`;
-      
-      console.log("🔍 Looking for domain:", fullSubdomain);
-      
-      tenant = await db.selectAll("tbl_tenants", "*", "domain = ?", [fullSubdomain]);
-      
-      if (tenant.length > 0) {
-        console.log("✅ Tenant found by subdomain:", {
-          id: tenant[0].id,
-          domain: tenant[0].domain,
-          template_id: tenant[0].template_id
-        });
-        
-        // Get settings for this tenant
-        settings = await db.selectAll("tbl_settings", "*", "tenant_id = ?", [tenant[0].id]);
-      } else {
-        console.log("❌ No tenant found for subdomain:", fullSubdomain);
-      }
-    }
-
-    // ========== CHECK 3: Custom Domain (mycustomstore.com) ==========
-    if (!tenant || tenant.length === 0) {
-      console.log("🔍 Checking custom domain:", hostname);
-      
-      settings = await db.selectAll(
-        "tbl_settings",
+      const subdomainTenant = await db.selectAll(
+        "tbl_tenants",
         "*",
-        "primary_domain_name = ? AND dns_status = ?",
-        [hostname, "verified"]
+        "domain = ?",
+        [`${subdomain}.${baseDomain}`]
       );
 
-      if (settings.length > 0) {
-        console.log("✅ Settings found for custom domain");
-        
-        tenant = await db.selectAll("tbl_tenants", "*", "id = ?", [settings[0].tenant_id]);
-        
-        if (tenant.length > 0) {
-          console.log("✅ Tenant found by custom domain:", tenant[0].id);
-        }
+      if (subdomainTenant && subdomainTenant.length > 0) {
+        tenant = subdomainTenant[0];
+        matchType = "subdomain";
+        console.log(`✅ [Bydomain] Found tenant by subdomain: ${tenant.id}`);
       }
     }
 
-    // ========== CHECK 4: Not Found ==========
-    if (!tenant || tenant.length === 0) {
-      console.log("❌ No tenant found for hostname:", hostname);
+    // ========== CHECK 3: Custom Domain (e.g., mystore.com) ==========
+    if (!tenant) {
+      console.log(`🔍 [Bydomain] Checking custom domain: ${cleanHostname}`);
+
+      // First, check if it's a verified custom domain
+      const customDomainSettings = await db.query(
+        `SELECT s.*, t.* 
+         FROM tbl_settings s
+         INNER JOIN tbl_tenants t ON s.tenant_id = t.id
+         WHERE s.primary_domain_name = ? 
+         AND s.dns_status = 'verified'
+         AND s.domain_type = 'custom_domain'`,
+        [cleanHostname]
+      );
+
+      if (customDomainSettings && customDomainSettings.length > 0) {
+        tenant = customDomainSettings[0];
+        matchType = "custom_domain";
+        console.log(`✅ [Bydomain] Found tenant by custom domain: ${tenant.id}`);
+      }
+    }
+
+    // ========== NOT FOUND ==========
+    if (!tenant) {
+      console.log(`❌ [Bydomain] No tenant found for hostname: ${cleanHostname}`);
       return res.status(404).json({
         error: "TENANT_NOT_FOUND",
         message: "No store found for this domain",
-        hostname: hostname,
-        debug: {
-          checked_subdomain: hostname.endsWith(`.${baseDomain}`),
-          checked_custom_domain: true
-        }
+        hostname: cleanHostname,
+        suggestion: "Please verify your domain is configured correctly",
       });
     }
 
     // ========== SUCCESS: Return Tenant Data ==========
-    const tenantData = tenant[0];
-    const settingsData = settings && settings.length > 0 ? settings[0] : null;
+    console.log(`✅ [Bydomain] Returning tenant data for: ${cleanHostname} (${matchType})`);
 
-    console.log("✅ Returning tenant data:", {
-      id: tenantData.id,
-      store_name: tenantData.store_name,
-      template_id: tenantData.template_id,
-      domain: tenantData.domain
-    });
-
-    res.status(200).json({
+    return res.json({
+      success: true,
+      matchType,
+      hostname: cleanHostname,
       tenant: {
-        id: tenantData.id,
-        template_id: parseInt(tenantData.template_id) || 1,
-        domain: tenantData.domain,
-        custom_domain: tenantData.custom_domain || null,
-        custom_domain_status: tenantData.custom_domain_status || "pending",
-        store_name: tenantData.store_name,
-        user_id: tenantData.user_id,
+        id: tenant.id,
+        name: tenant.name || tenant.site_name,
+        email: tenant.email,
+        domain: matchType === "subdomain" ? tenant.domain : cleanHostname,
+        template_id: tenant.template_id,
+        subdomain: tenant.domain,
+        custom_domain: matchType === "custom_domain" ? cleanHostname : null,
+        dns_status: tenant.dns_status || null,
       },
-      settings: settingsData || {},
     });
   } catch (error) {
-    console.error("❌ Bydomain Error:", error.stack);
-    res.status(500).json({ 
-      error: "SERVER_ERROR", 
-      message: error.message 
+    console.error("❌ [Bydomain] Error:", error);
+    return res.status(500).json({
+      error: "SERVER_ERROR",
+      message: "Failed to fetch tenant data",
+      details: error.message,
     });
   }
-};
+}
 
 /**
- * Get full tenant site data (all content)
+ * ✅ SECONDARY: Get full site data (for frontend rendering)
  */
-const getTenantSiteData = async (req, res) => {
+async function getTenantSiteData(req, res) {
   try {
-    let hostname = req.get("Host") || req.get("X-Forwarded-Host") || "";
-    hostname = hostname.split(":")[0].toLowerCase();
+    const hostname = req.get("host")?.toLowerCase() || req.get("x-forwarded-host")?.toLowerCase();
     
-    console.log("🔍 getTenantSiteData called with hostname:", hostname);
+    if (!hostname) {
+      return res.status(400).json({ error: "Missing hostname" });
+    }
+
+    const cleanHostname = hostname.split(':')[0];
+    console.log(`🔍 [getTenantSiteData] Fetching data for: ${cleanHostname}`);
 
     const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
-    
-    // Check if main domain
-    if (hostname === baseDomain || hostname === `www.${baseDomain}` || hostname === "localhost") {
-      return res.status(404).json({
-        error: "MAIN_DOMAIN",
-        message: "This is the main platform domain",
-      });
-    }
-
-    let tenant = null;
+    let tenantId = null;
 
     // Check subdomain
-    if (hostname.endsWith(`.${baseDomain}`)) {
-      const subdomain = hostname.replace(`.${baseDomain}`, "");
-      const fullSubdomain = `${subdomain}.${baseDomain}`;
-      
-      tenant = await db.selectAll("tbl_tenants", "*", "domain = ?", [fullSubdomain]);
-    }
-
-    // Check custom domain
-    if (!tenant || tenant.length === 0) {
-      const settings = await db.selectAll(
-        "tbl_settings",
-        "*",
-        "primary_domain_name = ? AND dns_status = ?",
-        [hostname, "verified"]
-      );
-
-      if (settings.length > 0) {
-        tenant = await db.selectAll("tbl_tenants", "*", "id = ?", [settings[0].tenant_id]);
+    if (cleanHostname.endsWith(`.${baseDomain}`)) {
+      const subdomain = cleanHostname.replace(`.${baseDomain}`, "");
+      const tenant = await db.selectAll("tbl_tenants", "id", "domain = ?", [`${subdomain}.${baseDomain}`]);
+      if (tenant && tenant.length > 0) {
+        tenantId = tenant[0].id;
       }
     }
 
-    if (!tenant || tenant.length === 0) {
-      console.log("❌ No tenant found for hostname:", hostname);
-      return res.status(404).json({
-        error: "TENANT_NOT_FOUND",
-        message: "No store found for this domain",
-      });
+    // Check custom domain
+    if (!tenantId) {
+      const settings = await db.selectAll(
+        "tbl_settings",
+        "tenant_id",
+        "primary_domain_name = ? AND dns_status = 'verified'",
+        [cleanHostname]
+      );
+      if (settings && settings.length > 0) {
+        tenantId = settings[0].tenant_id;
+      }
     }
 
-    const tenantData = tenant[0];
-    const tenantId = tenantData.id;
-
-    console.log("✅ Fetching site data for tenant:", tenantId);
+    if (!tenantId) {
+      return res.status(404).json({ error: "Tenant not found" });
+    }
 
     // Fetch all site data
-    const [homePage] = await db.selectAll("tbl_home_pages", "*", "tenant_id = ?", [tenantId]);
-    const categories = await db.selectAll("tbl_categories", "*", "tenant_id = ?", [tenantId]);
-    const products = await db.selectAll("tbl_products", "*", "tenant_id = ?", [tenantId]);
-    const [productpage] = await db.selectAll("tbl_product_page", "*", "tenant_id = ?", [tenantId]);
-    const [opportunityPage] = await db.selectAll("tbl_opportunity_page", "*", "tenant_id = ?", [tenantId]);
-    const [joinUsPage] = await db.selectAll("tbl_joinus_page", "*", "tenant_id = ?", [tenantId]);
-    const [contactUs] = await db.selectAll("tbl_contactus_page", "*", "tenant_id = ?", [tenantId]);
-    const blogs = await db.selectAll("tbl_blogs", "*", "tenant_id = ?", [tenantId]);
-    const blogBanners = await db.selectAll("tbl_blog_page_banners", "*", "tenant_id = ?", [tenantId]);
-    const footerDisclaimers = await db.selectAll("tbl_footer_disclaimers", "*", "tenant_id = ?", [tenantId]);
-    const footerSocialLinks = await db.selectAll("tbl_footer_social_links", "*", "tenant_id = ?", [tenantId]);
-    const sliderBanners = await db.selectAll("tbl_slider_banners", "*", "tenant_id = ?", [tenantId]);
-    const [tenantSetting] = await db.selectAll("tbl_settings", "*", "tenant_id = ?", [tenantId]);
+    const [tenant, settings, sliders, products, categories, blogs] = await Promise.all([
+      db.selectAll("tbl_tenants", "*", "id = ?", [tenantId]),
+      db.selectAll("tbl_settings", "*", "tenant_id = ?", [tenantId]),
+      db.selectAll("tbl_slider_banners", "*", "tenant_id = ?", [tenantId]),
+      db.selectAll("tbl_products", "*", "tenant_id = ? AND status = 'active'", [tenantId]),
+      db.selectAll("tbl_categories", "*", "tenant_id = ? AND status = 'active'", [tenantId]),
+      db.selectAll("tbl_blogs", "*", "tenant_id = ? AND status = 'published'", [tenantId]),
+    ]);
 
-    res.status(200).json({
-      tenant: {
-        tenant_id: tenantData.id,
-        store_name: tenantData.store_name,
-        template_id: parseInt(tenantData.template_id) || 1,
-        domain: tenantData.domain,
-        custom_domain: tenantData.custom_domain,
-      },
-      site_data: {
-        home: homePage || {},
-        categories: categories || [],
-        products: products || [],
-        product_page: productpage || {},
-        opportunity: opportunityPage || {},
-        join_us: joinUsPage || {},
-        contact: contactUs || {},
-        blog: blogs || [],
-        blog_banners: blogBanners || [],
-        footer_disclaimers: footerDisclaimers || [],
-        footer_social_links: footerSocialLinks || [],
-        slider_banners: sliderBanners || [],
-        tenant_setting: tenantSetting || {},
-      },
+    return res.json({
+      success: true,
+      tenant: tenant[0],
+      settings: settings[0],
+      sliders,
+      products,
+      categories,
+      blogs,
     });
   } catch (error) {
-    console.error("❌ getTenantSiteData Error:", error.stack);
-    res.status(500).json({ 
-      error: "SERVER_ERROR", 
-      message: error.message 
-    });
+    console.error("❌ [getTenantSiteData] Error:", error);
+    return res.status(500).json({ error: error.message });
   }
-};
+}
 
 module.exports = {
   Bydomain,

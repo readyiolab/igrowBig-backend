@@ -11,7 +11,9 @@ const rootDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
 console.log("🔍 Cloudflare Config Check:");
 console.log({
   zoneId: CLOUDFLARE_ZONE_ID ? "✓ SET" : "✗ MISSING",
-  apiToken: CLOUDFLARE_API_TOKEN ? `✓ SET (${CLOUDFLARE_API_TOKEN.substring(0, 10)}...)` : "✗ MISSING",
+  apiToken: CLOUDFLARE_API_TOKEN
+    ? `✓ SET (${CLOUDFLARE_API_TOKEN.substring(0, 10)}...)`
+    : "✗ MISSING",
   tokenLength: CLOUDFLARE_API_TOKEN?.length || 0,
   rootDomain: rootDomain,
 });
@@ -23,7 +25,7 @@ if (!CLOUDFLARE_ZONE_ID || !CLOUDFLARE_API_TOKEN) {
 const cfApi = axios.create({
   baseURL: "https://api.cloudflare.com/client/v4",
   headers: {
-    "Authorization": `Bearer ${CLOUDFLARE_API_TOKEN}`,
+    Authorization: `Bearer ${CLOUDFLARE_API_TOKEN}`,
     "Content-Type": "application/json",
   },
 });
@@ -49,7 +51,10 @@ async function cfRecordExists(name) {
   } catch (err) {
     console.error("❌ cfRecordExists Error:", err.response?.status);
     console.error("Response:", JSON.stringify(err.response?.data, null, 2));
-    console.error("Token used:", CLOUDFLARE_API_TOKEN?.substring(0, 10) + "...");
+    console.error(
+      "Token used:",
+      CLOUDFLARE_API_TOKEN?.substring(0, 10) + "..."
+    );
     return false;
   }
 }
@@ -70,12 +75,12 @@ async function addSubdomain(subdomain, verificationToken = null) {
     const exists = await cfRecordExists(recordName);
     if (exists) {
       console.log(`✅ Subdomain already exists: ${recordName}`);
-      
+
       // Still add TXT record if verification token provided
       if (verificationToken) {
         await addVerificationTxtRecord(subdomain, verificationToken);
       }
-      
+
       return { success: true, alreadyExists: true };
     }
 
@@ -95,19 +100,26 @@ async function addSubdomain(subdomain, verificationToken = null) {
 
     if (cnameResponse.data.success) {
       console.log(`✅ Cloudflare CNAME added: ${recordName}`);
-      
+
       // Add verification TXT record if token provided
       if (verificationToken) {
         await addVerificationTxtRecord(subdomain, verificationToken);
       }
-      
+
       return { success: true, data: cnameResponse.data.result };
     } else {
-      console.error("❌ Cloudflare API returned errors:", cnameResponse.data.errors);
+      console.error(
+        "❌ Cloudflare API returned errors:",
+        cnameResponse.data.errors
+      );
       return { success: false, error: cnameResponse.data.errors };
     }
   } catch (err) {
-    console.error("❌ Cloudflare addSubdomain Error:", err.response?.status, err.response?.data);
+    console.error(
+      "❌ Cloudflare addSubdomain Error:",
+      err.response?.status,
+      err.response?.data
+    );
     return {
       success: false,
       error: err.response?.data || err.message,
@@ -120,12 +132,14 @@ async function addSubdomain(subdomain, verificationToken = null) {
  */
 async function addVerificationTxtRecord(subdomain, token) {
   const txtRecordName = `_igrowbig-verification.${subdomain}.${rootDomain}`;
-  
+
   try {
     // Check if TXT record already exists
     const exists = await cfRecordExists(txtRecordName);
     if (exists) {
-      console.log(`✅ Verification TXT record already exists: ${txtRecordName}`);
+      console.log(
+        `✅ Verification TXT record already exists: ${txtRecordName}`
+      );
       return { success: true, alreadyExists: true };
     }
 
@@ -142,14 +156,20 @@ async function addVerificationTxtRecord(subdomain, token) {
     );
 
     if (txtResponse.data.success) {
-      console.log(`✅ Cloudflare TXT verification record added: ${txtRecordName}`);
+      console.log(
+        `✅ Cloudflare TXT verification record added: ${txtRecordName}`
+      );
       return { success: true, data: txtResponse.data.result };
     } else {
       console.error("❌ Failed to add TXT record:", txtResponse.data.errors);
       return { success: false, error: txtResponse.data.errors };
     }
   } catch (err) {
-    console.error("❌ addVerificationTxtRecord Error:", err.response?.status, err.response?.data);
+    console.error(
+      "❌ addVerificationTxtRecord Error:",
+      err.response?.status,
+      err.response?.data
+    );
     return { success: false, error: err.response?.data || err.message };
   }
 }
@@ -187,7 +207,11 @@ async function deleteSubdomain(name) {
     console.log(`⚠️ Record not found: ${name}`);
     return false;
   } catch (err) {
-    console.error("❌ deleteSubdomain Error:", err.response?.status, err.response?.data);
+    console.error(
+      "❌ deleteSubdomain Error:",
+      err.response?.status,
+      err.response?.data
+    );
     return false;
   }
 }
@@ -202,16 +226,19 @@ async function testConnection() {
     console.log("Zone:", response.data.result.name);
     return true;
   } catch (err) {
-    console.error("❌ Cloudflare connection failed:", err.response?.status, err.response?.data);
+    console.error(
+      "❌ Cloudflare connection failed:",
+      err.response?.status,
+      err.response?.data
+    );
     return false;
   }
 }
 
-
 async function manualVerifyDomain(req, res) {
   try {
     const { tenantId } = req.params;
-    
+
     const settings = await db.selectAll(
       "tbl_settings",
       "primary_domain_name, dns_verification_txt, email_id", // Include email_id
@@ -227,7 +254,9 @@ async function manualVerifyDomain(req, res) {
     const expectedTxt = settings[0].dns_verification_txt;
     const email = settings[0].email_id; // Get email from settings
 
-    console.log(`🔍 Manual verification for tenant ${tenantId}, domain: ${domain}`);
+    console.log(
+      `🔍 Manual verification for tenant ${tenantId}, domain: ${domain}`
+    );
 
     const result = {
       domain,
@@ -246,7 +275,7 @@ async function manualVerifyDomain(req, res) {
 
       result.checks.cloudflare_cname = {
         found: cfCnameResponse.data.result.length > 0,
-        records: cfCnameResponse.data.result.map(r => r.name),
+        records: cfCnameResponse.data.result.map((r) => r.name),
       };
 
       // Check TXT in Cloudflare
@@ -258,15 +287,20 @@ async function manualVerifyDomain(req, res) {
 
       result.checks.cloudflare_txt = {
         found: cfTxtResponse.data.result.length > 0,
-        matches: cfTxtResponse.data.result.some(r => r.content === expectedTxt),
+        matches: cfTxtResponse.data.result.some(
+          (r) => r.content === expectedTxt
+        ),
       };
 
       // Verify based on Cloudflare records
-      if (result.checks.cloudflare_cname?.found || result.checks.cloudflare_txt?.matches) {
+      if (
+        result.checks.cloudflare_cname?.found ||
+        result.checks.cloudflare_txt?.matches
+      ) {
         result.verified = true;
 
         const now = new Date().toISOString().slice(0, 19).replace("T", " ");
-        
+
         await db.update(
           "tbl_settings",
           { dns_status: "verified", updated_at: now },
@@ -280,7 +314,9 @@ async function manualVerifyDomain(req, res) {
         if (email) {
           await sendDomainNotification(email, domain, "verified");
         } else {
-          console.warn(`⚠️ No email found for tenant ${tenantId}. Skipping notification.`);
+          console.warn(
+            `⚠️ No email found for tenant ${tenantId}. Skipping notification.`
+          );
         }
 
         result.message = "✅ Domain verified successfully via Cloudflare API!";
@@ -298,7 +334,11 @@ async function manualVerifyDomain(req, res) {
     } catch (err) {
       result.checks.error = err.message;
       result.message = "❌ Error checking Cloudflare API.";
-      console.error(`❌ Cloudflare API error:`, err.response?.status, err.response?.data);
+      console.error(
+        `❌ Cloudflare API error:`,
+        err.response?.status,
+        err.response?.data
+      );
     }
 
     res.json(result);
@@ -430,10 +470,13 @@ async function debugDNS(req, res) {
     // 5. Summary
     results.summary = {
       cloudflare_setup: results.checks.cloudflare_cname?.found || false,
-      dns_resolving: results.checks.dns_a?.found || results.checks.dns_cname?.found || false,
+      dns_resolving:
+        results.checks.dns_a?.found || results.checks.dns_cname?.found || false,
       txt_record_created: results.checks.cloudflare_txt?.found || false,
       txt_record_propagated: results.checks.dns_txt?.found || false,
-      ready_for_verification: (results.checks.dns_a?.found || results.checks.dns_cname?.found) && results.checks.dns_txt?.found,
+      ready_for_verification:
+        (results.checks.dns_a?.found || results.checks.dns_cname?.found) &&
+        results.checks.dns_txt?.found,
     };
 
     res.json(results);
@@ -442,7 +485,228 @@ async function debugDNS(req, res) {
   }
 }
 
-module.exports = { addSubdomain, cfRecordExists, deleteSubdomain, testConnection,addVerificationTxtRecord,
-  debugDNS,           // Add this
-  manualVerifyDomain  // Add this
- };
+async function addCustomHostnameWithSSL(domain) {
+  try {
+    console.log(`🔐 Adding custom hostname with SSL: ${domain}`);
+
+    const payload = {
+      hostname: domain,
+      ssl: {
+        method: "txt", // Verification method
+        type: "dv", // Domain Validation SSL
+        settings: {
+          min_tls_version: "1.2",
+          tls_1_3: "on",
+          http2: "on",
+        },
+        wildcard: false, // Set true if you want *.mystore.com
+      },
+    };
+
+    const response = await cfApi.post(
+      `/zones/${CLOUDFLARE_ZONE_ID}/custom_hostnames`,
+      payload
+    );
+
+    if (response.data.success) {
+      const result = response.data.result;
+
+      console.log(`✅ Custom hostname added successfully!`);
+      console.log(`   Domain: ${domain}`);
+      console.log(`   SSL Status: ${result.ssl.status}`);
+      console.log(
+        `   Certificate Authority: ${
+          result.ssl.certificate_authority || "Let's Encrypt"
+        }`
+      );
+
+      // Extract verification details
+      const txtRecord = result.ssl.validation_records?.[0] || null;
+
+      return {
+        success: true,
+        hostname_id: result.id,
+        ssl_status: result.ssl.status, // pending_validation → pending_deployment → active
+
+        // Verification details for customer
+        verification: {
+          method: "TXT",
+          name: txtRecord?.txt_name || `_acme-challenge.${domain}`,
+          value: txtRecord?.txt_value || "Will be provided",
+        },
+
+        // Certificate details
+        certificate: {
+          status: result.ssl.status,
+          issuer: result.ssl.certificate_authority,
+          validation_type: result.ssl.type,
+        },
+
+        // Overall status
+        status: result.status, // pending → active
+      };
+    }
+
+    return {
+      success: false,
+      error: response.data.errors,
+      message: "Failed to add custom hostname",
+    };
+  } catch (err) {
+    console.error("❌ addCustomHostnameWithSSL Error:", err.response?.data);
+
+    // Handle "already exists" error
+    if (err.response?.data?.errors?.[0]?.code === 1414) {
+      console.log("ℹ️ Custom hostname already exists, fetching status...");
+      return await getCustomHostnameStatus(domain);
+    }
+
+    return {
+      success: false,
+      error: err.response?.data?.errors || err.message,
+    };
+  }
+}
+
+/**
+ * 🔍 Check SSL certificate status for custom domain
+ */
+async function getCustomHostnameStatus(domain) {
+  try {
+    const response = await cfApi.get(
+      `/zones/${CLOUDFLARE_ZONE_ID}/custom_hostnames`,
+      { params: { hostname: domain } }
+    );
+
+    if (response.data.result?.[0]) {
+      const hostname = response.data.result[0];
+      const ssl = hostname.ssl;
+
+      console.log(`📊 SSL Status for ${domain}:`, ssl.status);
+
+      return {
+        success: true,
+        hostname_id: hostname.id,
+        ssl_status: ssl.status,
+        ssl_active: ssl.status === "active",
+
+        verification: {
+          method: "TXT",
+          name:
+            ssl.validation_records?.[0]?.txt_name ||
+            `_acme-challenge.${domain}`,
+          value: ssl.validation_records?.[0]?.txt_value || null,
+        },
+
+        certificate: {
+          status: ssl.status,
+          issuer: ssl.certificate_authority || "Let's Encrypt",
+          expires_on: ssl.expires_on || null,
+        },
+
+        status: hostname.status,
+      };
+    }
+
+    return {
+      success: false,
+      error: "Custom hostname not found in Cloudflare",
+    };
+  } catch (err) {
+    console.error("❌ getCustomHostnameStatus Error:", err.response?.data);
+    return {
+      success: false,
+      error: err.response?.data || err.message,
+    };
+  }
+}
+
+/**
+ * 🔄 Poll for SSL activation (wait for certificate to be issued)
+ */
+async function waitForSSLActivation(
+  domain,
+  maxAttempts = 20,
+  interval = 15000
+) {
+  console.log(`⏳ Waiting for SSL activation for ${domain}...`);
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const status = await getCustomHostnameStatus(domain);
+
+    if (status.success) {
+      console.log(
+        `   Attempt ${attempt}/${maxAttempts} - SSL Status: ${status.ssl_status}`
+      );
+
+      if (status.ssl_status === "active") {
+        console.log(`✅ SSL is ACTIVE for ${domain}!`);
+        return { success: true, ssl_active: true, attempts: attempt };
+      }
+
+      if (status.ssl_status === "pending_validation") {
+        console.log(`   ⏳ Waiting for customer to add TXT record...`);
+      }
+
+      if (status.ssl_status === "pending_deployment") {
+        console.log(`   ⏳ Certificate issued, deploying to edge...`);
+      }
+    }
+
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+  }
+
+  console.log(`⚠️ SSL activation timeout for ${domain}`);
+  return {
+    success: false,
+    ssl_active: false,
+    attempts: maxAttempts,
+    message: "SSL activation timeout - check verification TXT record",
+  };
+}
+
+/**
+ * 🗑️ Delete custom hostname (removes SSL too)
+ */
+async function deleteCustomHostname(domain) {
+  try {
+    const statusResult = await getCustomHostnameStatus(domain);
+
+    if (!statusResult.success || !statusResult.hostname_id) {
+      return { success: true, message: "Hostname not found" };
+    }
+
+    await cfApi.delete(
+      `/zones/${CLOUDFLARE_ZONE_ID}/custom_hostnames/${statusResult.hostname_id}`
+    );
+
+    console.log(`🗑️ Deleted custom hostname: ${domain}`);
+    return { success: true };
+  } catch (err) {
+    console.error("❌ deleteCustomHostname Error:", err.response?.data);
+    return { success: false, error: err.response?.data || err.message };
+  }
+}
+
+module.exports = {
+   // DNS functions
+  addSubdomain,
+  cfRecordExists,
+  deleteSubdomain,
+    addVerificationTxtRecord,
+
+
+    
+  // Utility functions
+  testConnection,
+  debugDNS,
+  manualVerifyDomain,
+
+  //  SSL FUNCTIONS
+  addCustomHostnameWithSSL,
+  getCustomHostnameStatus,
+  waitForSSLActivation,
+  deleteCustomHostname,
+};
