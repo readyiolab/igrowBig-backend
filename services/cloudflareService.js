@@ -4,8 +4,8 @@ const axios = require("axios");
 const dns = require("dns").promises;
 const db = require("../config/db");
 
-const CLOUDFLARE_EMAIL = process.env.CLOUDFLARE_EMAIL;
-const CLOUDFLARE_API_KEY = process.env.CLOUDFLARE_API_TOKEN; // Updated to use API Key
+// ✅ FIXED: Only need API Token and Zone ID (no email needed for tokens)
+const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const CLOUDFLARE_ZONE_ID = process.env.CLOUDFLARE_ZONE_ID;
 const rootDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
 
@@ -13,33 +13,22 @@ const rootDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
 console.log("🔍 Cloudflare Config Check:");
 console.log({
   zoneId: CLOUDFLARE_ZONE_ID ? "✓ SET" : "✗ MISSING",
-  apiKey: CLOUDFLARE_API_KEY
-    ? `✓ SET (${CLOUDFLARE_API_KEY.substring(0, 10)}...)`
-    : "✗ MISSING",
-  email: CLOUDFLARE_EMAIL
-    ? `✓ SET (${CLOUDFLARE_EMAIL})`
+  apiToken: CLOUDFLARE_API_TOKEN
+    ? `✓ SET (${CLOUDFLARE_API_TOKEN.substring(0, 10)}...)`
     : "✗ MISSING",
   rootDomain: rootDomain,
 });
 
-if (!CLOUDFLARE_ZONE_ID || !CLOUDFLARE_API_KEY || !CLOUDFLARE_EMAIL) {
-  console.error("❌ CRITICAL: Missing Cloudflare credentials for SSL functions!");
+if (!CLOUDFLARE_ZONE_ID || !CLOUDFLARE_API_TOKEN) {
+  console.error("❌ CRITICAL: Missing Cloudflare credentials!");
+  console.error("Required: CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID");
 }
 
-// Axios instance for DNS functions (using API Token if needed)
-const cfApiDns = axios.create({
+// ✅ FIXED: Single axios instance with Bearer token authentication
+const cfApi = axios.create({
   baseURL: "https://api.cloudflare.com/client/v4",
   headers: {
-    Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`, // Keep for compatibility with DNS functions
-    "Content-Type": "application/json",
-  },
-});
-
-// Axios instance for Custom Hostname/SSL functions (using API Key)
-const cfApiSsl = axios.create({
-  baseURL: "https://api.cloudflare.com/client/v4",
-  headers: {
-    Authorization: `Bearer ${CLOUDFLARE_API_KEY}`, // ✅ Correct for API tokens
+    Authorization: `Bearer ${CLOUDFLARE_API_TOKEN}`,
     "Content-Type": "application/json",
   },
 });
@@ -54,7 +43,7 @@ async function cfRecordExists(name) {
   }
 
   try {
-    const response = await cfApiDns.get(
+    const response = await cfApi.get(
       `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
       {
         params: { name },
@@ -65,10 +54,6 @@ async function cfRecordExists(name) {
   } catch (err) {
     console.error("❌ cfRecordExists Error:", err.response?.status);
     console.error("Response:", JSON.stringify(err.response?.data, null, 2));
-    console.error(
-      "Token used:",
-      process.env.CLOUDFLARE_API_TOKEN?.substring(0, 10) + "..."
-    );
     return false;
   }
 }
@@ -77,7 +62,7 @@ async function cfRecordExists(name) {
  * ➕ Add subdomain CNAME record
  */
 async function addSubdomain(subdomain, verificationToken = null) {
-  if (!CLOUDFLARE_ZONE_ID || !process.env.CLOUDFLARE_API_TOKEN) {
+  if (!CLOUDFLARE_ZONE_ID || !CLOUDFLARE_API_TOKEN) {
     console.warn("⚠️ Missing Cloudflare credentials. Skipping DNS creation.");
     return { success: false, error: "Missing Cloudflare credentials" };
   }
@@ -107,7 +92,7 @@ async function addSubdomain(subdomain, verificationToken = null) {
       proxied: true,
     };
 
-    const cnameResponse = await cfApiDns.post(
+    const cnameResponse = await cfApi.post(
       `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
       cnamePayload
     );
@@ -164,7 +149,7 @@ async function addVerificationTxtRecord(subdomain, token) {
       ttl: 1,
     };
 
-    const txtResponse = await cfApiDns.post(
+    const txtResponse = await cfApi.post(
       `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
       txtPayload
     );
@@ -199,7 +184,7 @@ async function deleteSubdomain(name) {
 
   try {
     // Find the record
-    const response = await cfApiDns.get(
+    const response = await cfApi.get(
       `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
       {
         params: { name },
@@ -210,7 +195,7 @@ async function deleteSubdomain(name) {
       const recordId = response.data.result[0].id;
 
       // Delete the record
-      await cfApiDns.delete(
+      await cfApi.delete(
         `/zones/${CLOUDFLARE_ZONE_ID}/dns_records/${recordId}`
       );
 
@@ -235,7 +220,7 @@ async function deleteSubdomain(name) {
  */
 async function testConnection() {
   try {
-    const response = await cfApiSsl.get(`/zones/${CLOUDFLARE_ZONE_ID}`);
+    const response = await cfApi.get(`/zones/${CLOUDFLARE_ZONE_ID}`);
     console.log("✅ Cloudflare connection successful!");
     console.log("Zone:", response.data.result.name);
     return true;
@@ -256,8 +241,9 @@ async function addCustomHostnameWithSSL(domain) {
   try {
     console.log(`🔐 Adding custom hostname with SSL: ${domain}`);
 
-    if (!CLOUDFLARE_ZONE_ID || !CLOUDFLARE_API_KEY || !CLOUDFLARE_EMAIL) {
-      throw new Error("Missing Cloudflare credentials (API Key, Email, or Zone ID)");
+    // ✅ FIXED: Only check for token and zone ID
+    if (!CLOUDFLARE_ZONE_ID || !CLOUDFLARE_API_TOKEN) {
+      throw new Error("Missing Cloudflare credentials (API Token or Zone ID)");
     }
 
     const payload = {
@@ -274,7 +260,7 @@ async function addCustomHostnameWithSSL(domain) {
       },
     };
 
-    const response = await cfApiSsl.post(
+    const response = await cfApi.post(
       `/zones/${CLOUDFLARE_ZONE_ID}/custom_hostnames`,
       payload
     );
@@ -320,13 +306,23 @@ async function addCustomHostnameWithSSL(domain) {
   } catch (err) {
     console.error("❌ addCustomHostnameWithSSL Error:", err.response?.data || err.message);
 
-    // Handle authentication error
-    if (err.response?.data?.errors?.[0]?.code === 10000) {
-      console.error("Authentication error: Invalid or missing API Key/Email. Please verify CLOUDFLARE_API_KEY, CLOUDFLARE_EMAIL, and CLOUDFLARE_ZONE_ID.");
+    // Handle authentication errors
+    if (err.response?.data?.errors?.[0]?.code === 10000 || 
+        err.response?.data?.errors?.[0]?.code === 10001) {
+      console.error("❌ Authentication failed!");
+      console.error("   Please verify:");
+      console.error("   1. CLOUDFLARE_API_TOKEN is correct");
+      console.error("   2. Token has 'SSL and Certificates:Edit' permission");
+      console.error("   3. Token is not expired");
+      console.error("   4. CLOUDFLARE_ZONE_ID matches your domain");
+      
       return {
         success: false,
-        error: [{ code: 10000, message: "Authentication error: Invalid or missing API Key/Email" }],
-        message: "Failed to authenticate with Cloudflare. Please contact support.",
+        error: [{
+          code: err.response.data.errors[0].code,
+          message: "Authentication failed: Invalid API Token or insufficient permissions"
+        }],
+        message: "Failed to authenticate with Cloudflare. Please verify your API Token has 'SSL and Certificates:Edit' permission.",
       };
     }
 
@@ -349,7 +345,7 @@ async function addCustomHostnameWithSSL(domain) {
  */
 async function getCustomHostnameStatus(domain) {
   try {
-    const response = await cfApiSsl.get(
+    const response = await cfApi.get(
       `/zones/${CLOUDFLARE_ZONE_ID}/custom_hostnames`,
       { params: { hostname: domain } }
     );
@@ -447,7 +443,7 @@ async function deleteCustomHostname(domain) {
       return { success: true, message: "Hostname not found" };
     }
 
-    await cfApiSsl.delete(
+    await cfApi.delete(
       `/zones/${CLOUDFLARE_ZONE_ID}/custom_hostnames/${statusResult.hostname_id}`
     );
 
@@ -495,7 +491,7 @@ async function manualVerifyDomain(req, res) {
     // Check Cloudflare API directly
     try {
       // Check CNAME in Cloudflare
-      const cfCnameResponse = await cfApiSsl.get(
+      const cfCnameResponse = await cfApi.get(
         `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
         { params: { name: domain } }
       );
@@ -507,7 +503,7 @@ async function manualVerifyDomain(req, res) {
 
       // Check TXT in Cloudflare
       const txtName = `_igrowbig-verification.${domain}`;
-      const cfTxtResponse = await cfApiSsl.get(
+      const cfTxtResponse = await cfApi.get(
         `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
         { params: { name: txtName } }
       );
@@ -537,26 +533,11 @@ async function manualVerifyDomain(req, res) {
 
         await db.update("tbl_tenants", { domain }, "id = ?", [tenantId]);
 
-        // Send verification email
-        if (email) {
-          await sendDomainNotification(email, domain, "verified");
-        } else {
-          console.warn(
-            `⚠️ No email found for tenant ${tenantId}. Skipping notification.`
-          );
-        }
-
         result.message = "✅ Domain verified successfully via Cloudflare API!";
         console.log(`✅ Manual verification successful for ${domain}`);
       } else {
         result.message = "❌ DNS records not found in Cloudflare.";
         console.log(`❌ Manual verification failed for ${domain}`);
-        // Send unverified email if applicable
-        if (email) {
-          await sendDomainNotification(email, domain, "unverified", {
-            step1: { value: expectedTxt },
-          });
-        }
       }
     } catch (err) {
       result.checks.error = err.message;
@@ -593,7 +574,7 @@ async function debugDNS(req, res) {
 
     // Check Cloudflare API for CNAME records
     try {
-      const cfResponse = await cfApiSsl.get(
+      const cfResponse = await cfApi.get(
         `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
         {
           params: { name: fullDomain },
@@ -618,7 +599,7 @@ async function debugDNS(req, res) {
 
     // Check TXT record in Cloudflare
     try {
-      const cfTxtResponse = await cfApiSsl.get(
+      const cfTxtResponse = await cfApi.get(
         `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
         {
           params: { name: txtDomain },
