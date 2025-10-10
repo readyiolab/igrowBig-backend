@@ -5,7 +5,7 @@ const dns = require("dns").promises;
 const db = require("../config/db");
 
 const CLOUDFLARE_EMAIL = process.env.CLOUDFLARE_EMAIL;
-const CLOUDFLARE_API_KEY = process.env.CLOUDFLARE_API_KEY; // Updated to use API Key
+const CLOUDFLARE_API_KEY = process.env.CLOUDFLARE_API_TOKEN; // Updated to use API Key
 const CLOUDFLARE_ZONE_ID = process.env.CLOUDFLARE_ZONE_ID;
 const rootDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
 
@@ -39,8 +39,7 @@ const cfApiDns = axios.create({
 const cfApiSsl = axios.create({
   baseURL: "https://api.cloudflare.com/client/v4",
   headers: {
-    "X-Auth-Email": CLOUDFLARE_EMAIL,
-    "X-Auth-Key": CLOUDFLARE_API_KEY,
+    Authorization: `Bearer ${CLOUDFLARE_API_KEY}`, // ✅ Correct for API tokens
     "Content-Type": "application/json",
   },
 });
