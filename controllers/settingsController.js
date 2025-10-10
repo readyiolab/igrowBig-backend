@@ -227,21 +227,37 @@ const UpdateSettings = [
 
           if (!sslResult.success) {
             console.error("SSL setup failed:", sslResult.error);
-            return res.status(500).json({
-              error: "SSL_SETUP_FAILED",
-              message: "Failed to setup SSL for custom domain",
-              details: process.env.NODE_ENV === "development" ? sslResult.error : undefined,
-            });
+            const errorDetails = sslResult.error || [];
+
+            // Handle specific Cloudflare errors
+            if (errorDetails.some(err => err.code === 10000)) {
+              console.error("Authentication error detected. Please verify CLOUDFLARE_API_KEY, CLOUDFLARE_EMAIL, and CLOUDFLARE_ZONE_ID.");
+              return res.status(500).json({
+                error: "CLOUDFLARE_AUTH_ERROR",
+                message: "Failed to authenticate with Cloudflare. Please contact support to verify API credentials.",
+                details: process.env.NODE_ENV === "development" ? sslResult.error : undefined,
+              });
+            }
+
+            if (errorDetails.some(err => err.code === 1414)) {
+              console.log(`Custom hostname ${normalizedCustomDomain} already exists, continuing with existing settings.`);
+              dnsStatus = sslResult.status === "active" ? "verified" : "pending";
+              sslStatus = sslResult.ssl_status;
+              cloudflareHostnameId = sslResult.hostname_id;
+              websiteLink = `${protocol}://${normalizedCustomDomain}`;
+            } else {
+              return res.status(500).json({
+                error: "SSL_SETUP_FAILED",
+                message: sslResult.message || "Failed to setup SSL for custom domain",
+                details: process.env.NODE_ENV === "development" ? sslResult.error : undefined,
+              });
+            }
+          } else {
+            dnsStatus = sslResult.status === "active" ? "verified" : "pending";
+            sslStatus = sslResult.ssl_status;
+            cloudflareHostnameId = sslResult.hostname_id;
+            websiteLink = `${protocol}://${normalizedCustomDomain}`;
           }
-
-          console.log(`✅ SSL setup initiated for ${normalizedCustomDomain}`);
-          console.log(`   Status: ${sslResult.ssl_status}`);
-          console.log(`   Hostname ID: ${sslResult.hostname_id}`);
-
-          dnsStatus = "pending";
-          sslStatus = sslResult.ssl_status;
-          cloudflareHostnameId = sslResult.hostname_id;
-          websiteLink = `${protocol}://${normalizedCustomDomain}`;
 
           // Update tenant with custom domain
           await db.update(
