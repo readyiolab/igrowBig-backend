@@ -87,7 +87,6 @@ const {
  
   UpdateSettings,
   GetSettings,
-  CheckSSLStatus,
 } = require("../controllers/settingsController");
 const {
   GetTenantNotifications,
@@ -258,17 +257,6 @@ router.delete(
 
 router.put("/:tenantId/settings", authenticateUser, UpdateSettings);
 router.get("/:tenantId/settings", authenticateUser, GetSettings);
-/**
- * Check SSL status for custom domain
- * GET /api/tenants/:tenantId/check-ssl
- */
-
-router.get("/tenants/:tenantId/check-ssl", authenticateUser, CheckSSLStatus);
-
-
-
-
-
 
 //GetTraining
 router.get("/:tenantId/trainings", authenticateUser, GetTenantTrainings);

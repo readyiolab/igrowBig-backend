@@ -216,7 +216,7 @@ class Database {
     // this.host = "localhost";
     // this.username = "root";
     // this.password = "";
-    this.database = "db_igrowbig"; 
+    // this.database = "db_igrowbig"; 
     this.host = dbHost;
     this.username = dbUser;
     this.password = dbPass;

@@ -8,7 +8,7 @@ const { DNS_STATUS_ENUM } = require("../config/constants");
 const { sendDomainNotification } = require("../config/email");
 const { sendWebhook } = require("../services/webhookService");
 const { body, validationResult } = require("express-validator");
-const { addCustomHostnameWithSSL, getCustomHostnameStatus, addSubdomain } = require("../services/cloudflareService");
+const { startVerificationProcess } = require("../services/domainVerificationService");
 
 // Configure multer for temporary local storage
 const storage = multer.diskStorage({
@@ -44,8 +44,8 @@ const GetSettings = [
   async (req, res) => {
     try {
       const { tenantId } = req.params;
-
-      // Authorization check
+      
+      // Authorization check - tenant user can only access their own settings
       if (!checkTenantAuth(req, tenantId))
         return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
 
@@ -72,8 +72,6 @@ const GetSettings = [
           nht_store_link: null,
           nht_joining_link: null,
           dns_status: "pending",
-          ssl_status: "pending",
-          cloudflare_hostname_id: null,
           custom_domain: null,
         };
         return res.status(200).json({
@@ -85,11 +83,10 @@ const GetSettings = [
       const settingsData = settings[0];
       const tenantData = tenant[0];
 
-      // Ensure dns_status and ssl_status are valid
+      // Ensure dns_status is valid
       if (!DNS_STATUS_ENUM || !DNS_STATUS_ENUM.includes(settingsData.dns_status)) {
         settingsData.dns_status = "pending";
       }
-      settingsData.ssl_status = settingsData.ssl_status || "pending";
 
       // Enrich settings with tenant domain info
       const enrichedSettings = {
@@ -132,11 +129,11 @@ const UpdateSettings = [
   async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty())
+      if (!errors.isEmpty()) 
         return res.status(400).json({ errors: errors.array() });
 
       const { tenantId } = req.params;
-
+      
       // Authorization check
       if (!checkTenantAuth(req, tenantId))
         return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
@@ -189,16 +186,15 @@ const UpdateSettings = [
       const timestamp = new Date().toISOString().slice(0, 19).replace("T", " ");
 
       let dnsStatus = currentSettings.dns_status || "pending";
-      let sslStatus = currentSettings.ssl_status || "pending";
-      let cloudflareHostnameId = currentSettings.cloudflare_hostname_id || null;
       let websiteLink = currentSettings.website_link;
+      let verificationToken = null;
       let verificationInstructions = null;
 
       // ========== CUSTOM DOMAIN LOGIC ==========
       if (domain_type === "custom_domain" && custom_domain) {
-        const normalizedCustomDomain = custom_domain.trim().toLowerCase().replace(/^www\./, "");
+        const normalizedCustomDomain = custom_domain.trim().toLowerCase();
 
-        // Validate custom domain format
+        // Validate custom domain format more strictly
         if (normalizedCustomDomain === baseDomain || normalizedCustomDomain === `www.${baseDomain}`) {
           return res.status(400).json({
             error: "INVALID_DOMAIN",
@@ -220,44 +216,15 @@ const UpdateSettings = [
           });
         }
 
-        // Start DNS verification and SSL setup with Cloudflare
+        // Start DNS verification process
         try {
-          console.log(`🔐 Setting up custom domain with SSL: ${normalizedCustomDomain}`);
-          const sslResult = await addCustomHostnameWithSSL(normalizedCustomDomain);
-
-          if (!sslResult.success) {
-            console.error("SSL setup failed:", sslResult.error);
-            const errorDetails = sslResult.error || [];
-
-            // Handle specific Cloudflare errors
-            if (errorDetails.some(err => err.code === 10000)) {
-              console.error("Authentication error detected. Please verify CLOUDFLARE_API_KEY, CLOUDFLARE_EMAIL, and CLOUDFLARE_ZONE_ID.");
-              return res.status(500).json({
-                error: "CLOUDFLARE_AUTH_ERROR",
-                message: "Failed to authenticate with Cloudflare. Please contact support to verify API credentials.",
-                details: process.env.NODE_ENV === "development" ? sslResult.error : undefined,
-              });
-            }
-
-            if (errorDetails.some(err => err.code === 1414)) {
-              console.log(`Custom hostname ${normalizedCustomDomain} already exists, continuing with existing settings.`);
-              dnsStatus = sslResult.status === "active" ? "verified" : "pending";
-              sslStatus = sslResult.ssl_status;
-              cloudflareHostnameId = sslResult.hostname_id;
-              websiteLink = `${protocol}://${normalizedCustomDomain}`;
-            } else {
-              return res.status(500).json({
-                error: "SSL_SETUP_FAILED",
-                message: sslResult.message || "Failed to setup SSL for custom domain",
-                details: process.env.NODE_ENV === "development" ? sslResult.error : undefined,
-              });
-            }
-          } else {
-            dnsStatus = sslResult.status === "active" ? "verified" : "pending";
-            sslStatus = sslResult.ssl_status;
-            cloudflareHostnameId = sslResult.hostname_id;
-            websiteLink = `${protocol}://${normalizedCustomDomain}`;
-          }
+          const verificationResult = await startVerificationProcess(
+            normalizedTenantId,
+            normalizedCustomDomain
+          );
+          
+          verificationToken = verificationResult.token;
+          dnsStatus = "pending";
 
           // Update tenant with custom domain
           await db.update(
@@ -271,40 +238,43 @@ const UpdateSettings = [
             [normalizedTenantId]
           );
 
+          websiteLink = `${protocol}://${normalizedCustomDomain}`;
+
+          console.log(`Custom domain verification started for tenant ${tenantId}: ${normalizedCustomDomain}`);
+
           verificationInstructions = {
-            status: sslResult.ssl_status,
+            status: "pending",
+            token: verificationToken,
             domain: normalizedCustomDomain,
             instructions: {
               step1: {
-                title: "Add TXT Record for SSL Verification",
-                type: "TXT",
-                name: sslResult.verification.name,
-                value: sslResult.verification.value,
-                description: "Required to verify domain ownership and issue SSL certificate",
-                ttl: "Auto or 300 seconds",
+                title: "Verify Domain Ownership",
+                type: "TXT Record",
+                host: `_igrowbig-verification.${normalizedCustomDomain}`,
+                value: verificationToken,
+                ttl: "Automatic or 3600",
+                description: "Add this TXT record to your DNS provider to prove you own this domain",
               },
               step2: {
-                title: "Point Your Domain to Our Server",
-                type: "CNAME",
-                name: "@",
+                title: "Point Domain to Our Platform",
+                type: "CNAME Record (Recommended)",
+                host: normalizedCustomDomain === normalizedCustomDomain.replace(/^www\./, '') 
+                  ? normalizedCustomDomain 
+                  : normalizedCustomDomain.replace(/^www\./, ''),
                 value: baseDomain,
-                description: "Routes all traffic to your store",
-                ttl: "Auto or 300 seconds",
-                alternative: {
-                  title: "Alternative: A Record (if CNAME doesn't work)",
-                  type: "A",
-                  name: "@",
-                  value: process.env.SERVER_IP || "139.59.8.68",
-                  description: "Use this if your DNS provider doesn't allow CNAME for root domain",
-                },
+                ttl: "Automatic or 3600",
+                description: "After verification, add this CNAME record to make your domain work",
+              },
+              step3_alternative: {
+                title: "Alternative: Direct IP Pointing",
+                type: "A Record",
+                host: normalizedCustomDomain,
+                value: process.env.SERVER_IP || "139.59.8.68",
+                ttl: "Automatic or 3600",
+                description: "If CNAME doesn't work, use A record instead",
               },
             },
-            note: `After adding both DNS records, your store will be accessible at https://${normalizedCustomDomain} within 15-30 minutes. SSL certificate will be issued automatically. You'll receive an email notification when everything is ready.`,
-            timeline: {
-              dns_propagation: "5-15 minutes (usually)",
-              ssl_issuance: "5-15 minutes after DNS verification",
-              total_time: "15-30 minutes (can take up to 48 hours in rare cases)",
-            },
+            note: "1. Add the TXT record first and wait 1-5 minutes for verification. 2. Once verified, add the CNAME or A record. 3. DNS changes can take up to 48 hours to fully propagate.",
           };
 
         } catch (verificationError) {
@@ -317,73 +287,23 @@ const UpdateSettings = [
         }
       }
 
-      // ========== SUBDOMAIN LOGIC ==========
-      if (domain_type === "sub_domain" || !domain_type) {
-        let subdomain = tenantData.domain;
-
-        // If no subdomain exists, create one
-        if (!subdomain || tenantData.custom_domain) {
-          const baseName = (tenantData.name || `tenant${normalizedTenantId}`)
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, "");
-
-          let counter = 0;
-          let available = false;
-
-          while (!available && counter < 100) {
-            subdomain = counter === 0 ? baseName : `${baseName}${counter}`;
-            const existing = await db.selectAll(
-              "tbl_tenants",
-              "id",
-              "domain = ?",
-              [subdomain]
-            );
-
-            if (existing.length === 0) {
-              available = true;
-            } else {
-              counter++;
-            }
-          }
-
-          if (!available) {
-            return res.status(500).json({
-              error: "SUBDOMAIN_GENERATION_FAILED",
-              message: "Unable to generate unique subdomain",
-            });
-          }
-
-          // Add subdomain to Cloudflare
-          try {
-            await addSubdomain(subdomain);
-          } catch (subdomainError) {
-            console.error("Subdomain setup error:", subdomainError);
-            return res.status(500).json({
-              error: "SUBDOMAIN_SETUP_FAILED",
-              message: "Failed to setup subdomain in Cloudflare",
-              details: process.env.NODE_ENV === "development" ? subdomainError.message : undefined,
-            });
-          }
-        }
-
-        websiteLink = `${protocol}://${subdomain}.${baseDomain}`;
+      // ========== REVERT TO SUBDOMAIN ==========
+      if (domain_type === "sub_domain" && tenantData.custom_domain) {
+        websiteLink = `${protocol}://${tenantData.domain}`;
         dnsStatus = "verified"; // Subdomains are always verified
-        sslStatus = "active"; // Subdomains are secured by default
 
-        // Update tenant to remove custom domain
         await db.update(
           "tbl_tenants",
           {
             custom_domain: null,
-            custom_domain_status: null,
-            domain: `${subdomain}.${baseDomain}`,
+            custom_domain_status: "pending",
             updated_at: timestamp,
           },
           "id = ?",
           [normalizedTenantId]
         );
 
-        console.log(`Tenant ${normalizedTenantId} reverted to subdomain: ${subdomain}.${baseDomain}`);
+        console.log(`Tenant ${tenantId} reverted to subdomain: ${tenantData.domain}`);
       }
 
       // ========== UPDATE SETTINGS ==========
@@ -391,12 +311,10 @@ const UpdateSettings = [
         domain_type: domain_type || currentSettings.domain_type || "sub_domain",
         primary_domain_name:
           domain_type === "custom_domain" && custom_domain
-            ? normalizedCustomDomain
-            : `${subdomain}.${baseDomain}`,
+            ? custom_domain
+            : tenantData.domain,
         website_link: websiteLink || currentSettings.website_link,
         dns_status: dnsStatus,
-        ssl_status: sslStatus,
-        cloudflare_hostname_id: cloudflareHostnameId,
         first_name: first_name !== undefined ? first_name : currentSettings.first_name,
         last_name: last_name !== undefined ? last_name : currentSettings.last_name,
         email_id: email_id !== undefined ? email_id : currentSettings.email_id,
@@ -467,16 +385,16 @@ const UpdateSettings = [
         try {
           await sendDomainNotification(
             email_id || currentSettings.email_id || tenantData.email,
-            normalizedCustomDomain,
+            custom_domain,
             dnsStatus
           );
         } catch (emailError) {
           console.error("Failed to send domain notification email:", emailError);
           // Don't fail the request
         }
-
+        
         try {
-          await sendWebhook(normalizedTenantId, normalizedCustomDomain, dnsStatus);
+          await sendWebhook(normalizedTenantId, custom_domain, dnsStatus);
         } catch (webhookError) {
           console.error("Failed to send webhook:", webhookError);
           // Don't fail the request
@@ -505,115 +423,16 @@ const UpdateSettings = [
       };
 
       if (verificationInstructions) {
-        response.ssl_setup = {
-          status: sslStatus,
-          message: sslStatus === "active"
-            ? "SSL is already active!"
-            : "SSL certificate will be issued automatically after DNS verification",
-          hostname_id: cloudflareHostnameId,
-        };
         response.verification = verificationInstructions;
       }
 
       res.status(200).json(response);
     } catch (error) {
       console.error("UpdateSettings Error:", error.stack);
-      res.status(500).json({
-        error: "SERVER_ERROR",
+      res.status(500).json({ 
+        error: "SERVER_ERROR", 
         message: "Failed to update settings",
         details: process.env.NODE_ENV === "development" ? error.message : undefined,
-      });
-    }
-  },
-];
-
-// ==================== CHECK SSL STATUS ====================
-const CheckSSLStatus = [
-  async (req, res) => {
-    try {
-      const { tenantId } = req.params;
-
-      // Authorization check
-      if (!checkTenantAuth(req, tenantId))
-        return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
-
-      const settings = await db.selectAll(
-        "tbl_settings",
-        "primary_domain_name, ssl_status, dns_status, domain_type, cloudflare_hostname_id",
-        "tenant_id = ?",
-        [tenantId]
-      );
-
-      if (!settings || settings.length === 0) {
-        return res.status(404).json({
-          error: "SETTINGS_NOT_FOUND",
-          message: "No settings found for this tenant",
-        });
-      }
-
-      const domainType = settings[0].domain_type;
-
-      if (domainType !== "custom_domain") {
-        return res.json({
-          success: true,
-          domain_type: domainType,
-          message: "SSL check not applicable for subdomains (already secured)",
-          ssl_active: true,
-        });
-      }
-
-      const domain = settings[0].primary_domain_name;
-
-      console.log(`🔍 Checking SSL status for ${domain}`);
-
-      // Get current status from Cloudflare
-      const sslStatus = await getCustomHostnameStatus(domain);
-
-      if (sslStatus.success) {
-        const now = new Date().toISOString().slice(0, 19).replace("T", " ");
-
-        // Update database with latest status
-        await db.update(
-          "tbl_settings",
-          {
-            ssl_status: sslStatus.ssl_status,
-            dns_status: sslStatus.ssl_active ? "verified" : settings[0].dns_status,
-            updated_at: now,
-          },
-          "tenant_id = ?",
-          [tenantId]
-        );
-
-        return res.json({
-          success: true,
-          domain,
-          domain_type: domainType,
-          ssl: {
-            status: sslStatus.ssl_status,
-            active: sslStatus.ssl_active,
-            issuer: sslStatus.certificate.issuer,
-            expires_on: sslStatus.certificate.expires_on,
-          },
-          dns_status: sslStatus.ssl_active ? "verified" : settings[0].dns_status,
-          https_ready: sslStatus.ssl_active,
-          message: sslStatus.ssl_active
-            ? `✅ Your store is live at https://${domain}`
-            : `⏳ ${sslStatus.ssl_status === "pending_validation"
-                ? "Waiting for DNS verification. Please add the TXT record."
-                : "SSL certificate is being deployed..."}`,
-        });
-      }
-
-      return res.status(500).json({
-        error: "SSL_CHECK_FAILED",
-        message: "Unable to check SSL status from Cloudflare",
-        details: sslStatus.error,
-      });
-    } catch (error) {
-      console.error("❌ CheckSSLStatus Error:", error);
-      return res.status(500).json({
-        error: "SERVER_ERROR",
-        message: error.message,
       });
     }
   },
@@ -622,5 +441,4 @@ const CheckSSLStatus = [
 module.exports = {
   GetSettings,
   UpdateSettings,
-  CheckSSLStatus,
 };
