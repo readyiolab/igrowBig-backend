@@ -9,6 +9,7 @@ const { setupDomainVerificationCron } = require("./cron/domainVerificationCron")
 
 const tenantRoutes = require("./routes/tenantRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const adminMigrationRoutes = require('./routes/adminMigrationRoutes');
 const userRoutes = require("./routes/userRoutes");
 const templateRoutes = require("./routes/templateRoutes");
 const publicTenantRoutes = require("./routes/publicTenantRoutes");
@@ -141,6 +142,7 @@ app.use((req, res, next) => {
 // ========== ROUTES ==========
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
+app.use('/api/admin', adminMigrationRoutes);
 app.use("/api/tenants", tenantRoutes);
 app.use("/api/templates", templateRoutes);
 app.use("/api/newsletters", newsletterRoutes);
