@@ -3,6 +3,7 @@ require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 const axios = require("axios");
 const dns = require("dns").promises;
 const db = require("../config/db");
+
 const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const CLOUDFLARE_ZONE_ID = process.env.CLOUDFLARE_ZONE_ID;
 const rootDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
@@ -29,7 +30,7 @@ const cfApi = axios.create({
 });
 
 /**
- * 🔍 Check if DNS record exists
+ * Check if DNS record exists in Cloudflare
  */
 async function cfRecordExists(name) {
   if (!CLOUDFLARE_ZONE_ID) {
@@ -40,22 +41,19 @@ async function cfRecordExists(name) {
   try {
     const response = await cfApi.get(
       `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
-      {
-        params: { name },
-      }
+      { params: { name } }
     );
 
     return response.data.result && response.data.result.length > 0;
   } catch (err) {
     console.error("❌ cfRecordExists Error:", err.response?.status);
     console.error("Response:", JSON.stringify(err.response?.data, null, 2));
-    console.error("Token used:", CLOUDFLARE_API_TOKEN?.substring(0, 10) + "...");
     return false;
   }
 }
 
 /**
- * ➕ Add subdomain CNAME record
+ * Add subdomain CNAME record to Cloudflare
  */
 async function addSubdomain(subdomain, verificationToken = null) {
   if (!CLOUDFLARE_ZONE_ID || !CLOUDFLARE_API_TOKEN) {
@@ -116,7 +114,7 @@ async function addSubdomain(subdomain, verificationToken = null) {
 }
 
 /**
- * ➕ Add verification TXT record
+ * Add verification TXT record to Cloudflare
  */
 async function addVerificationTxtRecord(subdomain, token) {
   const txtRecordName = `_igrowbig-verification.${subdomain}.${rootDomain}`;
@@ -155,7 +153,7 @@ async function addVerificationTxtRecord(subdomain, token) {
 }
 
 /**
- * 🗑️ Delete DNS record
+ * Delete DNS record from Cloudflare
  */
 async function deleteSubdomain(name) {
   if (!CLOUDFLARE_ZONE_ID) {
@@ -167,9 +165,7 @@ async function deleteSubdomain(name) {
     // Find the record
     const response = await cfApi.get(
       `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
-      {
-        params: { name },
-      }
+      { params: { name } }
     );
 
     if (response.data.result && response.data.result.length > 0) {
@@ -193,7 +189,7 @@ async function deleteSubdomain(name) {
 }
 
 /**
- * 🧪 Test Cloudflare connection
+ * Test Cloudflare API connection
  */
 async function testConnection() {
   try {
@@ -207,35 +203,42 @@ async function testConnection() {
   }
 }
 
-
+/**
+ * Manual domain verification endpoint (for admin use)
+ * This checks both Cloudflare records AND uses the verification service
+ */
 async function manualVerifyDomain(req, res) {
   try {
     const { tenantId } = req.params;
+    const { manualVerifyDomain: verifyDomainLogic } = require("./domainVerificationService");
     
+    // Get domain info from database
     const settings = await db.selectAll(
       "tbl_settings",
-      "primary_domain_name, dns_verification_txt",
+      "primary_domain_name, dns_verification_txt, dns_status",
       "tenant_id = ?",
       [tenantId]
     );
 
     if (!settings || settings.length === 0) {
-      return res.status(404).json({ error: "Tenant not found" });
+      return res.status(404).json({ 
+        error: "TENANT_NOT_FOUND",
+        message: "Tenant not found" 
+      });
     }
 
     const domain = settings[0].primary_domain_name;
     const expectedTxt = settings[0].dns_verification_txt;
+    const currentStatus = settings[0].dns_status;
 
     console.log(`🔍 Manual verification for tenant ${tenantId}, domain: ${domain}`);
 
-    const result = {
-      domain,
-      tenant_id: tenantId,
-      checks: {},
-      verified: false,
-    };
+    // Use the verification service logic
+    const result = await verifyDomainLogic(tenantId, domain);
 
-    // Check Cloudflare API directly (more reliable than DNS)
+    // Also check Cloudflare records for additional info
+    const cloudflareChecks = {};
+    
     try {
       // Check CNAME in Cloudflare
       const cfCnameResponse = await cfApi.get(
@@ -243,9 +246,13 @@ async function manualVerifyDomain(req, res) {
         { params: { name: domain } }
       );
 
-      result.checks.cloudflare_cname = {
+      cloudflareChecks.cloudflare_cname = {
         found: cfCnameResponse.data.result.length > 0,
-        records: cfCnameResponse.data.result.map(r => r.name),
+        records: cfCnameResponse.data.result.map(r => ({
+          type: r.type,
+          name: r.name,
+          content: r.content
+        })),
       };
 
       // Check TXT in Cloudflare
@@ -255,52 +262,46 @@ async function manualVerifyDomain(req, res) {
         { params: { name: txtName } }
       );
 
-      result.checks.cloudflare_txt = {
+      cloudflareChecks.cloudflare_txt = {
         found: cfTxtResponse.data.result.length > 0,
         matches: cfTxtResponse.data.result.some(r => r.content === expectedTxt),
+        records: cfTxtResponse.data.result.map(r => r.content),
       };
-
-      // Verify based on Cloudflare records (not DNS propagation)
-      if (result.checks.cloudflare_cname?.found || result.checks.cloudflare_txt?.matches) {
-        result.verified = true;
-
-        const now = new Date().toISOString().slice(0, 19).replace("T", " ");
-        
-        await db.update(
-          "tbl_settings",
-          { dns_status: "verified", updated_at: now },
-          "tenant_id = ?",
-          [tenantId]
-        );
-
-        await db.update("tbl_tenants", { domain }, "id = ?", [tenantId]);
-
-        result.message = "✅ Domain verified successfully via Cloudflare API!";
-        console.log(`✅ Manual verification successful for ${domain}`);
-      } else {
-        result.message = "❌ DNS records not found in Cloudflare.";
-        console.log(`❌ Manual verification failed for ${domain}`);
-      }
-
     } catch (err) {
-      result.checks.error = err.message;
-      result.message = "❌ Error checking Cloudflare API.";
+      cloudflareChecks.error = err.message;
     }
 
-    res.json(result);
+    res.json({
+      success: result.verified,
+      domain: domain,
+      tenant_id: tenantId,
+      previous_status: currentStatus,
+      current_status: result.verified ? "verified" : (result.txt_verified ? "partially_verified" : "pending"),
+      verification: {
+        txt_verified: result.txt_verified,
+        domain_pointing: result.domain_pointing,
+      },
+      cloudflare_info: cloudflareChecks,
+      message: result.message,
+      timestamp: new Date().toISOString()
+    });
+
   } catch (error) {
     console.error("Manual verification error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: "VERIFICATION_ERROR",
+      message: error.message 
+    });
   }
 }
+
 /**
- * Debug endpoint to check DNS records for a subdomain
+ * Debug DNS records for a subdomain
  * GET /api/admin/debug-dns/:subdomain
  */
 async function debugDNS(req, res) {
   try {
     const { subdomain } = req.params;
-    const rootDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
     const fullDomain = `${subdomain}.${rootDomain}`;
     const txtDomain = `_igrowbig-verification.${fullDomain}`;
 
@@ -310,19 +311,11 @@ async function debugDNS(req, res) {
       checks: {},
     };
 
-    // 1. Check Cloudflare API for records
+    // 1. Check Cloudflare API for CNAME records
     try {
-      const cfResponse = await axios.get(
-        `https://api.cloudflare.com/client/v4/zones/${process.env.CLOUDFLARE_ZONE_ID}/dns_records`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          params: {
-            name: fullDomain,
-          },
-        }
+      const cfResponse = await cfApi.get(
+        `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
+        { params: { name: fullDomain } }
       );
 
       results.checks.cloudflare_cname = {
@@ -341,19 +334,11 @@ async function debugDNS(req, res) {
       };
     }
 
-    // Check TXT record in Cloudflare
+    // 2. Check Cloudflare API for TXT records
     try {
-      const cfTxtResponse = await axios.get(
-        `https://api.cloudflare.com/client/v4/zones/${process.env.CLOUDFLARE_ZONE_ID}/dns_records`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          params: {
-            name: txtDomain,
-          },
-        }
+      const cfTxtResponse = await cfApi.get(
+        `/zones/${CLOUDFLARE_ZONE_ID}/dns_records`,
+        { params: { name: txtDomain } }
       );
 
       results.checks.cloudflare_txt = {
@@ -370,7 +355,7 @@ async function debugDNS(req, res) {
       };
     }
 
-    // 2. Check DNS resolution for CNAME
+    // 3. Check DNS resolution for CNAME
     try {
       const cnameRecords = await dns.resolveCname(fullDomain);
       results.checks.dns_cname = {
@@ -384,7 +369,7 @@ async function debugDNS(req, res) {
       };
     }
 
-    // 3. Check DNS resolution for A records (Cloudflare proxy)
+    // 4. Check DNS resolution for A records
     try {
       const aRecords = await dns.resolve4(fullDomain);
       results.checks.dns_a = {
@@ -399,7 +384,7 @@ async function debugDNS(req, res) {
       };
     }
 
-    // 4. Check TXT record
+    // 5. Check TXT record resolution
     try {
       const txtRecords = await dns.resolveTxt(txtDomain);
       results.checks.dns_txt = {
@@ -413,22 +398,32 @@ async function debugDNS(req, res) {
       };
     }
 
-    // 5. Summary
+    // 6. Summary
     results.summary = {
       cloudflare_setup: results.checks.cloudflare_cname?.found || false,
       dns_resolving: results.checks.dns_a?.found || results.checks.dns_cname?.found || false,
       txt_record_created: results.checks.cloudflare_txt?.found || false,
       txt_record_propagated: results.checks.dns_txt?.found || false,
-      ready_for_verification: (results.checks.dns_a?.found || results.checks.dns_cname?.found) && results.checks.dns_txt?.found,
+      ready_for_verification: 
+        (results.checks.dns_a?.found || results.checks.dns_cname?.found) && 
+        results.checks.dns_txt?.found,
     };
 
     res.json(results);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: "DEBUG_ERROR",
+      message: error.message 
+    });
   }
 }
 
-module.exports = { addSubdomain, cfRecordExists, deleteSubdomain, testConnection,addVerificationTxtRecord,
-  debugDNS,           // Add this
-  manualVerifyDomain  // Add this
- };
+module.exports = {
+  addSubdomain,
+  cfRecordExists,
+  deleteSubdomain,
+  testConnection,
+  addVerificationTxtRecord,
+  debugDNS,
+  manualVerifyDomain,
+};

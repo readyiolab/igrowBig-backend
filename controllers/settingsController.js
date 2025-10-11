@@ -5,12 +5,11 @@ const fs = require("fs");
 const { checkTenantAuth } = require("../middleware/authMiddleware");
 const { uploadToS3, deleteFromS3 } = require("../services/awsS3");
 const { DNS_STATUS_ENUM } = require("../config/constants");
-const { sendDomainNotification } = require("../config/email");
 const { sendWebhook } = require("../services/webhookService");
 const { body, validationResult } = require("express-validator");
 const { startVerificationProcess } = require("../services/domainVerificationService");
 
-// Configure multer for temporary local storage
+// Multer configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const tempDir = path.join(__dirname, "../uploads/temp");
@@ -24,7 +23,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 4 * 1024 * 1024 }, // 4MB limit for site logo
+  limits: { fileSize: 4 * 1024 * 1024 }, // 4MB limit
   fileFilter: (req, file, cb) => {
     const filetypes = /jpeg|jpg|png/;
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
@@ -36,16 +35,12 @@ const upload = multer({
   },
 }).fields([{ name: "site_logo", maxCount: 1 }]);
 
-// Normalize database result
-const normalizeResult = (result) => (Array.isArray(result) && result.length > 0 ? result[0] : null);
-
 // ==================== GET SETTINGS ====================
 const GetSettings = [
   async (req, res) => {
     try {
       const { tenantId } = req.params;
       
-      // Authorization check - tenant user can only access their own settings
       if (!checkTenantAuth(req, tenantId))
         return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
 
@@ -65,17 +60,13 @@ const GetSettings = [
           mobile: null,
           address: "Not set",
           publish_on_site: 0,
-          skype: null,
           site_name: "Default Site",
           site_logo_url: null,
-          nht_website_link: null,
-          nht_store_link: null,
-          nht_joining_link: null,
           dns_status: "pending",
           custom_domain: null,
         };
         return res.status(200).json({
-          message: "No settings found, returning default settings",
+          message: "No settings found, returning defaults",
           settings: defaultSettings,
         });
       }
@@ -83,12 +74,10 @@ const GetSettings = [
       const settingsData = settings[0];
       const tenantData = tenant[0];
 
-      // Ensure dns_status is valid
       if (!DNS_STATUS_ENUM || !DNS_STATUS_ENUM.includes(settingsData.dns_status)) {
         settingsData.dns_status = "pending";
       }
 
-      // Enrich settings with tenant domain info
       const enrichedSettings = {
         ...settingsData,
         subdomain: tenantData.domain,
@@ -97,7 +86,7 @@ const GetSettings = [
       };
 
       res.status(200).json({
-        message: "Tenant settings retrieved successfully",
+        message: "Settings retrieved successfully",
         settings: enrichedSettings,
       });
     } catch (error) {
@@ -118,9 +107,11 @@ const UpdateSettings = [
     .optional()
     .custom((value) => {
       if (!value) return true;
-      return /^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(value);
+      // Validate domain format
+      const domainRegex = /^(?!:\/\/)([a-zA-Z0-9-_]+\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\.[a-zA-Z]{2,11}?$/;
+      return domainRegex.test(value);
     })
-    .withMessage("Invalid custom domain format (e.g., example.com)"),
+    .withMessage("Invalid domain format (e.g., example.com or www.example.com)"),
   body("first_name").optional().trim().isLength({ max: 100 }),
   body("last_name").optional().trim().isLength({ max: 100 }),
   body("email_id").optional().isEmail(),
@@ -134,7 +125,6 @@ const UpdateSettings = [
 
       const { tenantId } = req.params;
       
-      // Authorization check
       if (!checkTenantAuth(req, tenantId))
         return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
 
@@ -158,7 +148,7 @@ const UpdateSettings = [
       if (isNaN(normalizedTenantId)) {
         return res.status(400).json({
           error: "INVALID_TENANT_ID",
-          message: "Tenant ID must be a valid number",
+          message: "Invalid tenant ID",
         });
       }
 
@@ -170,9 +160,7 @@ const UpdateSettings = [
       );
       const currentSettings = existingSettings.length > 0 ? existingSettings[0] : {};
 
-      const tenant = await db.selectAll("tbl_tenants", "*", "id = ?", [
-        normalizedTenantId,
-      ]);
+      const tenant = await db.selectAll("tbl_tenants", "*", "id = ?", [normalizedTenantId]);
       if (tenant.length === 0) {
         return res.status(404).json({
           error: "TENANT_NOT_FOUND",
@@ -187,44 +175,50 @@ const UpdateSettings = [
 
       let dnsStatus = currentSettings.dns_status || "pending";
       let websiteLink = currentSettings.website_link;
-      let verificationToken = null;
       let verificationInstructions = null;
 
-      // ========== CUSTOM DOMAIN LOGIC ==========
+      // ========== CUSTOM DOMAIN SETUP ==========
       if (domain_type === "custom_domain" && custom_domain) {
-        const normalizedCustomDomain = custom_domain.trim().toLowerCase();
+        const normalizedCustomDomain = custom_domain.trim().toLowerCase().replace(/^https?:\/\//, '');
 
-        // Validate custom domain format more strictly
-        if (normalizedCustomDomain === baseDomain || normalizedCustomDomain === `www.${baseDomain}`) {
+        // Prevent using base domain
+        if (normalizedCustomDomain === baseDomain || 
+            normalizedCustomDomain === `www.${baseDomain}` ||
+            normalizedCustomDomain.endsWith(`.${baseDomain}`)) {
           return res.status(400).json({
             error: "INVALID_DOMAIN",
-            message: "You cannot use the platform's base domain as a custom domain",
+            message: "Cannot use platform domain as custom domain",
           });
         }
 
-        // Check if custom domain is already taken by another tenant
+        // Check if domain already used by another tenant
         const domainExists = await db.selectAll(
           "tbl_tenants",
-          "id",
+          "id, store_name",
           "custom_domain = ? AND id != ?",
           [normalizedCustomDomain, normalizedTenantId]
         );
+        
         if (domainExists.length > 0) {
           return res.status(400).json({
-            error: "DOMAIN_EXISTS",
-            message: "This custom domain is already taken by another store",
+            error: "DOMAIN_TAKEN",
+            message: "This domain is already connected to another store",
           });
         }
 
-        // Start DNS verification process
+        // Get user email for notifications
+        const userEmail = email_id || currentSettings.email_id || tenantData.email;
+
+        // Start verification process
         try {
           const verificationResult = await startVerificationProcess(
             normalizedTenantId,
-            normalizedCustomDomain
+            normalizedCustomDomain,
+            userEmail
           );
           
-          verificationToken = verificationResult.token;
           dnsStatus = "pending";
+          websiteLink = `${protocol}://${normalizedCustomDomain}`;
 
           // Update tenant with custom domain
           await db.update(
@@ -238,50 +232,49 @@ const UpdateSettings = [
             [normalizedTenantId]
           );
 
-          websiteLink = `${protocol}://${normalizedCustomDomain}`;
+          console.log(`✅ Custom domain setup started: ${normalizedCustomDomain}`);
 
-          console.log(`Custom domain verification started for tenant ${tenantId}: ${normalizedCustomDomain}`);
-
+          // Prepare instructions for response
           verificationInstructions = {
             status: "pending",
-            token: verificationToken,
+            token: verificationResult.token,
             domain: normalizedCustomDomain,
-            instructions: {
+            message: "Check your email for detailed setup instructions",
+            steps: {
               step1: {
-                title: "Verify Domain Ownership",
+                title: "Verify Domain Ownership (Add This First)",
                 type: "TXT Record",
-                host: `_igrowbig-verification.${normalizedCustomDomain}`,
-                value: verificationToken,
-                ttl: "Automatic or 3600",
-                description: "Add this TXT record to your DNS provider to prove you own this domain",
+                name: `_igrowbig-verification.${normalizedCustomDomain}`,
+                value: verificationResult.token,
+                ttl: "3600 (or Automatic)",
+                priority: "REQUIRED - Add this first"
               },
               step2: {
-                title: "Point Domain to Our Platform",
+                title: "Point Domain to Platform (Add After Verification)",
                 type: "CNAME Record (Recommended)",
-                host: normalizedCustomDomain === normalizedCustomDomain.replace(/^www\./, '') 
-                  ? normalizedCustomDomain 
-                  : normalizedCustomDomain.replace(/^www\./, ''),
+                name: `${normalizedCustomDomain.replace(/^www\./, '')} (or @)`,
                 value: baseDomain,
-                ttl: "Automatic or 3600",
-                description: "After verification, add this CNAME record to make your domain work",
-              },
-              step3_alternative: {
-                title: "Alternative: Direct IP Pointing",
-                type: "A Record",
-                host: normalizedCustomDomain,
-                value: process.env.SERVER_IP || "139.59.8.68",
-                ttl: "Automatic or 3600",
-                description: "If CNAME doesn't work, use A record instead",
-              },
+                ttl: "3600 (or Automatic)",
+                alternative: {
+                  type: "A Record",
+                  name: `@ (or ${normalizedCustomDomain})`,
+                  value: process.env.SERVER_IP || "139.59.8.68",
+                }
+              }
             },
-            note: "1. Add the TXT record first and wait 1-5 minutes for verification. 2. Once verified, add the CNAME or A record. 3. DNS changes can take up to 48 hours to fully propagate.",
+            notes: [
+              "Add TXT record first - we'll auto-verify in 1-5 minutes",
+              "After verification, add CNAME or A record",
+              "DNS changes can take up to 48 hours to propagate",
+              "You'll receive email updates on verification status"
+            ]
           };
 
         } catch (verificationError) {
-          console.error("Custom domain verification error:", verificationError);
+          console.error("Verification setup error:", verificationError);
           return res.status(500).json({
-            error: "VERIFICATION_ERROR",
-            message: "Failed to start domain verification process",
+            error: "VERIFICATION_FAILED",
+            message: "Failed to start domain verification",
             details: process.env.NODE_ENV === "development" ? verificationError.message : undefined,
           });
         }
@@ -303,7 +296,7 @@ const UpdateSettings = [
           [normalizedTenantId]
         );
 
-        console.log(`Tenant ${tenantId} reverted to subdomain: ${tenantData.domain}`);
+        console.log(`✅ Reverted to subdomain: ${tenantData.domain}`);
       }
 
       // ========== UPDATE SETTINGS ==========
@@ -311,7 +304,7 @@ const UpdateSettings = [
         domain_type: domain_type || currentSettings.domain_type || "sub_domain",
         primary_domain_name:
           domain_type === "custom_domain" && custom_domain
-            ? custom_domain
+            ? custom_domain.trim().toLowerCase()
             : tenantData.domain,
         website_link: websiteLink || currentSettings.website_link,
         dns_status: dnsStatus,
@@ -342,13 +335,12 @@ const UpdateSettings = [
           mimetype: logoFile.mimetype,
         };
 
-        // Delete old logo from S3
+        // Delete old logo
         if (currentSettings.site_logo_url) {
           try {
             await deleteFromS3(currentSettings.site_logo_url);
           } catch (deleteError) {
             console.error("Failed to delete old logo:", deleteError);
-            // Continue anyway
           }
         }
 
@@ -356,64 +348,50 @@ const UpdateSettings = [
         try {
           settingsData.site_logo_url = await uploadToS3(fileObject, folder);
         } catch (uploadError) {
-          console.error("Failed to upload logo:", uploadError);
+          console.error("Logo upload failed:", uploadError);
           return res.status(500).json({
             error: "UPLOAD_ERROR",
-            message: "Failed to upload site logo",
+            message: "Failed to upload logo",
           });
         } finally {
-          // Clean up temp file
           if (fs.existsSync(logoFile.path)) {
             fs.unlinkSync(logoFile.path);
           }
         }
       }
 
-      // ========== UPSERT SETTINGS ==========
+      // ========== SAVE SETTINGS ==========
       if (existingSettings.length > 0) {
-        await db.update("tbl_settings", settingsData, "tenant_id = ?", [
-          normalizedTenantId,
-        ]);
+        await db.update("tbl_settings", settingsData, "tenant_id = ?", [normalizedTenantId]);
       } else {
         settingsData.tenant_id = normalizedTenantId;
         settingsData.created_at = timestamp;
         await db.insert("tbl_settings", settingsData);
       }
 
-      // ========== SEND NOTIFICATIONS ==========
+      // ========== SEND WEBHOOK ==========
       if (custom_domain && domain_type === "custom_domain") {
-        try {
-          await sendDomainNotification(
-            email_id || currentSettings.email_id || tenantData.email,
-            custom_domain,
-            dnsStatus
-          );
-        } catch (emailError) {
-          console.error("Failed to send domain notification email:", emailError);
-          // Don't fail the request
-        }
-        
         try {
           await sendWebhook(normalizedTenantId, custom_domain, dnsStatus);
         } catch (webhookError) {
-          console.error("Failed to send webhook:", webhookError);
-          // Don't fail the request
+          console.error("Webhook failed:", webhookError);
         }
       }
 
-      // ========== FETCH UPDATED SETTINGS ==========
+      // ========== FETCH UPDATED DATA ==========
       const updatedSettings = await db.selectAll(
         "tbl_settings",
         "*",
         "tenant_id = ?",
         [normalizedTenantId]
       );
-      const updatedTenant = await db.selectAll("tbl_tenants", "*", "id = ?", [
-        normalizedTenantId,
-      ]);
+      const updatedTenant = await db.selectAll("tbl_tenants", "*", "id = ?", [normalizedTenantId]);
 
       const response = {
-        message: "Settings updated successfully",
+        success: true,
+        message: custom_domain && domain_type === "custom_domain" 
+          ? "Custom domain setup started. Check your email for instructions." 
+          : "Settings updated successfully",
         settings: {
           ...updatedSettings[0],
           subdomain: updatedTenant[0].domain,

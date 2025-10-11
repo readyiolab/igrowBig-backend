@@ -23,11 +23,43 @@ transporter.verify((error, success) => {
 });
 
 const emailStyles = `
-    font-family: Arial, sans-serif;
-    color: #333;
-    line-height: 1.6;
+  font-family: Arial, sans-serif;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 8px;
 `;
 
+const buttonStyle = `
+  display: inline-block;
+  padding: 12px 24px;
+  margin: 16px 0;
+  background-color: #4CAF50;
+  color: white !important;
+  text-decoration: none;
+  border-radius: 4px;
+  font-weight: bold;
+`;
+
+const codeStyle = `
+  background-color: #f4f4f4;
+  padding: 12px;
+  border-left: 4px solid #4CAF50;
+  margin: 10px 0;
+  font-family: monospace;
+  font-size: 14px;
+  word-break: break-all;
+`;
+
+const stepStyle = `
+  background-color: white;
+  padding: 16px;
+  margin: 16px 0;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+`;
 // ✅ Newsletter Confirmation Email
 const sendNewsletterSubscriptionEmail = async (to, name = "Subscriber") => {
   const htmlContent = `
@@ -196,65 +228,241 @@ const sendPasswordResetEmail = async (
   });
 };
 
+/**
+ * Send domain verification notification emails
+ */
 const sendDomainNotification = async (email, domain, status, instructions = null) => {
+  // Validate email
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     console.warn(`⚠️ Invalid or missing email for domain notification: ${domain}. Skipping email.`);
     return;
   }
 
   const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
-  const serverIP = process.env.SERVER_IP || "82.29.160.167";
-  const statusMessages = {
-    pending: `Your domain ${domain} is being verified. Follow the DNS setup instructions below. ⏳`,
-    verified: `Great news! Your domain ${domain} is verified and active! 🎉 Visit https://${domain} to see your store.`,
-    unverified: `We couldn't verify ${domain}. Check your DNS settings and try again. ❌`,
-  };
+  const serverIP = process.env.SERVER_IP || "139.59.8.68";
+  const supportEmail = process.env.SUPPORT_EMAIL || "support@arbilo.com";
 
-  const dnsInstructions = instructions ? `
-    <h3>DNS Setup Instructions for ${domain}</h3>
-    <p><strong>Step 1: Verify Domain Ownership (TXT Record)</strong></p>
-    <ul>
-      <li>Type: TXT</li>
-      <li>Host: _igrowbig-verification.${domain}</li>
-      <li>Value: ${instructions.step1.value}</li>
-      <li>TTL: Automatic or 3600</li>
-      <li>Description: Add this to your DNS provider to prove ownership. Wait 1-5 minutes.</li>
-    </ul>
-    <p><strong>Step 2: Point Domain (CNAME - Recommended)</strong></p>
-    <ul>
-      <li>Type: CNAME</li>
-      <li>Host: ${domain}</li>
-      <li>Value: ${baseDomain}</li>
-      <li>TTL: Automatic or 3600</li>
-      <li>Description: Routes traffic to our servers.</li>
-    </ul>
-    <p><strong>Step 3: Alternative (A Record)</strong></p>
-    <ul>
-      <li>Type: A</li>
-      <li>Host: ${domain}</li>
-      <li>Value: ${serverIP}</li>
-      <li>TTL: Automatic or 3600</li>
-      <li>Description: Use if CNAME doesn't work.</li>
-    </ul>
-    <p><strong>Notes:</strong> DNS changes may take 48 hours to propagate. Contact support@arbilo.com for help.</p>
-  ` : '';
+  let subject, htmlContent;
 
-  const htmlContent = `
-    <div style="${emailStyles}">
-      <h2>Domain Update for ${domain}</h2>
-      <p>${statusMessages[status] || 'Domain status updated.'}</p>
-      ${status === 'verified' ? `<p>Your store is live at <a href="https://${domain}">https://${domain}</a>!</p>` : ''}
-      ${dnsInstructions}
-      <p>Regards,<br>iGrow Big Team</p>
-    </div>
-  `;
+  switch (status) {
+    case "pending":
+      subject = `🔍 Set Up Your Custom Domain: ${domain}`;
+      htmlContent = `
+        <div style="${emailStyles}">
+          <h2 style="color: #333;">🚀 Custom Domain Setup Started</h2>
+          <p>Hi there,</p>
+          <p>You've requested to connect <strong>${domain}</strong> to your store. Follow these steps to complete the setup:</p>
 
-  await transporter.sendMail({
-    from: '"iGrow Big" <hello@arbilo.com>',
-    to: email,
-    subject: `Domain ${domain} ${status.charAt(0).toUpperCase() + status.slice(1)}`,
-    html: htmlContent,
-  });
+          <div style="${stepStyle}">
+            <h3 style="color: #4CAF50; margin-top: 0;">Step 1: Verify Domain Ownership (Required First)</h3>
+            <p>Add this TXT record to your DNS provider to prove you own the domain:</p>
+            <div style="${codeStyle}">
+              <strong>Type:</strong> TXT<br>
+              <strong>Name/Host:</strong> _igrowbig-verification.${domain}<br>
+              <strong>Value:</strong> ${instructions?.step1?.value || 'N/A'}<br>
+              <strong>TTL:</strong> 3600 (or Automatic)
+            </div>
+            <p><small>⏱️ DNS propagation usually takes 1-5 minutes, but can take up to 48 hours.</small></p>
+          </div>
+
+          <div style="${stepStyle}">
+            <h3 style="color: #2196F3; margin-top: 0;">Step 2: Point Your Domain (After Verification)</h3>
+            <p><strong>Option A: CNAME Record (Recommended)</strong></p>
+            <div style="${codeStyle}">
+              <strong>Type:</strong> CNAME<br>
+              <strong>Name/Host:</strong> ${domain.replace(/^www\./, '')} ${domain.startsWith('www.') ? '(remove www)' : '(or @ for root)'}<br>
+              <strong>Value:</strong> ${baseDomain}<br>
+              <strong>TTL:</strong> 3600 (or Automatic)
+            </div>
+
+            <p style="margin-top: 20px;"><strong>Option B: A Record (If CNAME doesn't work)</strong></p>
+            <div style="${codeStyle}">
+              <strong>Type:</strong> A<br>
+              <strong>Name/Host:</strong> @ (or ${domain})<br>
+              <strong>Value:</strong> ${serverIP}<br>
+              <strong>TTL:</strong> 3600 (or Automatic)
+            </div>
+          </div>
+
+          <div style="background-color: #fff3cd; padding: 16px; border-left: 4px solid #ffc107; margin: 20px 0;">
+            <h4 style="margin-top: 0;">📝 Important Notes:</h4>
+            <ul style="margin: 10px 0; padding-left: 20px;">
+              <li>Complete Step 1 first - we'll verify automatically</li>
+              <li>After verification, add Step 2 records</li>
+              <li>DNS changes can take up to 48 hours to propagate globally</li>
+              <li>You'll receive a confirmation email once verified</li>
+            </ul>
+          </div>
+
+          <h3>Need Help?</h3>
+          <p>Common DNS providers setup guides:</p>
+          <ul>
+            <li><a href="https://www.godaddy.com/help/add-a-txt-record-19232">GoDaddy</a></li>
+            <li><a href="https://www.namecheap.com/support/knowledgebase/article.aspx/317/2237/how-do-i-add-txtspfdkimdmarc-records-for-my-domain">Namecheap</a></li>
+            <li><a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-creating.html">AWS Route 53</a></li>
+            <li><a href="https://support.cloudflare.com/hc/en-us/articles/360019093151">Cloudflare</a></li>
+          </ul>
+
+          <p>Questions? Contact us at <a href="mailto:${supportEmail}">${supportEmail}</a></p>
+
+          <p style="margin-top: 30px;">Best regards,<br><strong>iGrow Big Team</strong></p>
+        </div>
+      `;
+      break;
+
+    case "verified":
+      subject = `✅ Your Domain ${domain} is Live!`;
+      htmlContent = `
+        <div style="${emailStyles}">
+          <h2 style="color: #4CAF50;">🎉 Domain Successfully Verified!</h2>
+          <p>Great news! Your custom domain <strong>${domain}</strong> is now live and active.</p>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://${domain}" style="${buttonStyle}">Visit Your Store →</a>
+          </div>
+
+          <div style="${stepStyle}">
+            <h3 style="margin-top: 0;">✅ What's Working:</h3>
+            <ul>
+              <li>Domain ownership verified</li>
+              <li>DNS records configured correctly</li>
+              <li>SSL certificate active (https)</li>
+              <li>Your store is accessible at <a href="https://${domain}">https://${domain}</a></li>
+            </ul>
+          </div>
+
+          <div style="background-color: #e8f5e9; padding: 16px; border-left: 4px solid #4CAF50; margin: 20px 0;">
+            <h4 style="margin-top: 0;">🚀 Next Steps:</h4>
+            <ul style="margin: 10px 0;">
+              <li>Update your marketing materials with your new domain</li>
+              <li>Set up email forwarding for your domain (optional)</li>
+              <li>Share your store with customers!</li>
+            </ul>
+          </div>
+
+          <p>Need help? We're here: <a href="mailto:${supportEmail}">${supportEmail}</a></p>
+
+          <p style="margin-top: 30px;">Congratulations!<br><strong>iGrow Big Team</strong></p>
+        </div>
+      `;
+      break;
+
+    case "unverified":
+      subject = `❌ Domain Verification Failed: ${domain}`;
+      htmlContent = `
+        <div style="${emailStyles}">
+          <h2 style="color: #f44336;">❌ Domain Verification Unsuccessful</h2>
+          <p>We couldn't verify your domain <strong>${domain}</strong>.</p>
+
+          <div style="background-color: #ffebee; padding: 16px; border-left: 4px solid #f44336; margin: 20px 0;">
+            <h4 style="margin-top: 0;">Possible Issues:</h4>
+            <ul style="margin: 10px 0;">
+              <li>TXT record not added or incorrect value</li>
+              <li>DNS changes haven't propagated yet (can take up to 48 hours)</li>
+              <li>Records added to wrong domain/subdomain</li>
+              <li>Typo in the verification token</li>
+            </ul>
+          </div>
+
+          <div style="${stepStyle}">
+            <h3 style="margin-top: 0;">🔧 How to Fix:</h3>
+            <p><strong>1. Double-check your TXT record:</strong></p>
+            <div style="${codeStyle}">
+              <strong>Name/Host:</strong> _igrowbig-verification.${domain}<br>
+              <strong>Value:</strong> ${instructions?.step1?.value || 'Check your dashboard'}<br>
+            </div>
+
+            <p style="margin-top: 20px;"><strong>2. Verify DNS propagation:</strong></p>
+            <p>Use <a href="https://www.whatsmydns.net/#TXT/_igrowbig-verification.${domain}" target="_blank">WhatsMyDNS.net</a> to check if your TXT record is visible globally.</p>
+
+            <p style="margin-top: 20px;"><strong>3. Common mistakes to avoid:</strong></p>
+            <ul>
+              <li>Don't add quotes around the TXT value</li>
+              <li>Make sure there are no extra spaces</li>
+              <li>Add the record to the root domain, not a subdomain</li>
+            </ul>
+          </div>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://${baseDomain}/settings" style="${buttonStyle}">Try Again in Dashboard →</a>
+          </div>
+
+          <p>Still stuck? We're here to help: <a href="mailto:${supportEmail}">${supportEmail}</a></p>
+
+          <p style="margin-top: 30px;">Best regards,<br><strong>iGrow Big Team</strong></p>
+        </div>
+      `;
+      break;
+
+    case "partially_verified":
+      subject = `⚠️ Domain Ownership Verified - Finish Setup: ${domain}`;
+      htmlContent = `
+        <div style="${emailStyles}">
+          <h2 style="color: #ff9800;">⚠️ Almost There!</h2>
+          <p>Good news! You've successfully verified ownership of <strong>${domain}</strong>.</p>
+          <p>However, your domain isn't pointing to our platform yet.</p>
+
+          <div style="background-color: #fff3cd; padding: 16px; border-left: 4px solid #ffc107; margin: 20px 0;">
+            <h4 style="margin-top: 0;">✅ Completed:</h4>
+            <p>TXT record verified - domain ownership confirmed</p>
+            
+            <h4 style="margin-top: 20px;">⏳ Remaining:</h4>
+            <p>Add CNAME or A record to point your domain to our servers</p>
+          </div>
+
+          <div style="${stepStyle}">
+            <h3 style="margin-top: 0;">Complete Setup Now:</h3>
+            
+            <p><strong>Option A: CNAME Record (Recommended)</strong></p>
+            <div style="${codeStyle}">
+              <strong>Type:</strong> CNAME<br>
+              <strong>Name/Host:</strong> ${domain.replace(/^www\./, '')} (or @)<br>
+              <strong>Value:</strong> ${baseDomain}<br>
+              <strong>TTL:</strong> 3600
+            </div>
+
+            <p style="margin-top: 20px;"><strong>Option B: A Record</strong></p>
+            <div style="${codeStyle}">
+              <strong>Type:</strong> A<br>
+              <strong>Name/Host:</strong> @ (or ${domain})<br>
+              <strong>Value:</strong> ${serverIP}<br>
+              <strong>TTL:</strong> 3600
+            </div>
+          </div>
+
+          <p>Once added, your domain will be live within a few minutes!</p>
+
+          <p>Questions? <a href="mailto:${supportEmail}">${supportEmail}</a></p>
+
+          <p style="margin-top: 30px;">Best regards,<br><strong>iGrow Big Team</strong></p>
+        </div>
+      `;
+      break;
+
+    default:
+      subject = `Domain Update: ${domain}`;
+      htmlContent = `
+        <div style="${emailStyles}">
+          <h2>Domain Status Update</h2>
+          <p>Your domain <strong>${domain}</strong> status has been updated.</p>
+          <p>Contact us at <a href="mailto:${supportEmail}">${supportEmail}</a> for more information.</p>
+          <p>Best regards,<br><strong>iGrow Big Team</strong></p>
+        </div>
+      `;
+  }
+
+  try {
+    await transporter.sendMail({
+      from: `"iGrow Big" <${process.env.SMTP_USER || 'hello@arbilo.com'}>`,
+      to: email,
+      subject: subject,
+      html: htmlContent,
+    });
+    console.log(`✅ Email sent to ${email}: ${subject}`);
+  } catch (error) {
+    console.error(`❌ Failed to send email to ${email}:`, error.message);
+    throw error;
+  }
 };
 module.exports = {
   transporter,
