@@ -4,6 +4,8 @@ const PORT = 3001;
 const path = require("path");
 const cors = require("cors");
 const db = require("./config/db");
+const { setupDomainVerificationCron } = require("./cron/domainVerificationCron");
+
 
 const tenantRoutes = require("./routes/tenantRoutes");
 const adminRoutes = require("./routes/adminRoutes");
@@ -11,6 +13,11 @@ const userRoutes = require("./routes/userRoutes");
 const templateRoutes = require("./routes/templateRoutes");
 const publicTenantRoutes = require("./routes/publicTenantRoutes");
 const newsletterRoutes = require("./routes/newsletterRoutes");
+
+
+// Initialize Domain Verification Cron Job
+setupDomainVerificationCron();
+console.log("✅ Domain verification cron job started");
 
 // ========== CORS CONFIGURATION ==========
 // Enhanced CORS Configuration for server.js
