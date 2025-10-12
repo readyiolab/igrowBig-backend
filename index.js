@@ -6,7 +6,6 @@ const cors = require("cors");
 const db = require("./config/db");
 const { setupDomainVerificationCron } = require("./cron/domainVerificationCron");
 
-
 const tenantRoutes = require("./routes/tenantRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const adminMigrationRoutes = require('./routes/adminMigrationRoutes');
@@ -15,13 +14,11 @@ const templateRoutes = require("./routes/templateRoutes");
 const publicTenantRoutes = require("./routes/publicTenantRoutes");
 const newsletterRoutes = require("./routes/newsletterRoutes");
 
-
 // Initialize Domain Verification Cron Job
 setupDomainVerificationCron();
 console.log("✅ Domain verification cron job started");
 
 // ========== CORS CONFIGURATION ==========
-// Enhanced CORS Configuration for server.js
 app.use(
   cors({
     origin: async (origin, callback) => {
@@ -70,8 +67,32 @@ app.use(
           }
         }
 
-        // ========== ALLOW: Verified Custom Domains ==========
-        console.log("🔍 CORS: Checking custom domain:", originHostname);
+        // ========== ALLOW: Custom Domains from tbl_tenants ==========
+        console.log("🔍 CORS: Checking custom domain in tbl_tenants:", originHostname);
+
+        const customDomainTenant = await db.selectAll(
+          "tbl_tenants",
+          "id, custom_domain, custom_domain_status",
+          "custom_domain = ?",
+          [originHostname]
+        );
+
+        if (customDomainTenant.length > 0) {
+          const domainStatus = customDomainTenant[0].custom_domain_status;
+          
+          if (domainStatus === "verified") {
+            console.log("✅ CORS: Verified custom domain allowed (tbl_tenants):", originHostname);
+            return callback(null, true);
+          } else {
+            console.log("⚠️ CORS: Custom domain not verified (status: " + domainStatus + "):", originHostname);
+            // Allow for testing purposes
+            console.log("✅ CORS: Allowing unverified custom domain for testing:", originHostname);
+            return callback(null, true);
+          }
+        }
+
+        // ========== ALLOW: Custom Domains from tbl_settings (Fallback) ==========
+        console.log("🔍 CORS: Checking custom domain in tbl_settings:", originHostname);
 
         const settings = await db.selectAll(
           "tbl_settings",
@@ -84,7 +105,7 @@ app.use(
           const domainStatus = settings[0].dns_status;
           
           if (domainStatus === "verified") {
-            console.log("✅ CORS: Verified custom domain allowed:", originHostname);
+            console.log("✅ CORS: Verified custom domain allowed (tbl_settings):", originHostname);
             return callback(null, true);
           } else {
             console.log("⚠️ CORS: Custom domain not verified (status: " + domainStatus + "):", originHostname);
@@ -131,13 +152,6 @@ app.use((req, res, next) => {
 // ========== MIDDLEWARE ==========
 app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "Uploads")));
-
-// Add request logging
-app.use((req, res, next) => {
-  const hostname = req.get("Host") || "";
-  console.log(`📥 ${req.method} ${req.url} - Host: ${hostname}`);
-  next();
-});
 
 // ========== ROUTES ==========
 app.use("/api/users", userRoutes);
@@ -193,7 +207,7 @@ app.listen(PORT, () => {
 // ========== GRACEFUL SHUTDOWN ==========
 process.on("SIGTERM", () => {
   console.log("SIGTERM signal received: closing HTTP server");
-  server.close(() => {
+  app.close(() => {
     console.log("HTTP server closed");
     process.exit(0);
   });

@@ -2,7 +2,7 @@ const db = require("../config/db");
 
 /**
  * ✅ PRIMARY: Get tenant by ANY domain (subdomain or custom domain)
- * This checks both tbl_tenants.domain AND tbl_settings.primary_domain_name
+ * Checks: tbl_tenants.domain, tbl_tenants.custom_domain, tbl_settings.primary_domain_name
  */
 async function Bydomain(req, res) {
   try {
@@ -40,7 +40,7 @@ async function Bydomain(req, res) {
     let tenant = null;
     let matchType = null;
 
-    // ========== CHECK 2: Subdomain (e.g., shop.igrowbig.com) ==========
+    // ========== CHECK 2: Subdomain (e.g., poojastore.igrowbig.com) ==========
     if (cleanHostname.endsWith(`.${baseDomain}`)) {
       const subdomain = cleanHostname.replace(`.${baseDomain}`, "");
       console.log(`🔍 [Bydomain] Checking subdomain: ${subdomain}`);
@@ -59,25 +59,41 @@ async function Bydomain(req, res) {
       }
     }
 
-    // ========== CHECK 3: Custom Domain (e.g., mystore.com) ==========
+    // ========== CHECK 3: Custom Domain from tbl_tenants (e.g., readyio.com) ==========
     if (!tenant) {
-      console.log(`🔍 [Bydomain] Checking custom domain: ${cleanHostname}`);
+      console.log(`🔍 [Bydomain] Checking custom domain in tbl_tenants: ${cleanHostname}`);
 
-      // First, check if it's a verified custom domain
+      const customDomainTenant = await db.selectAll(
+        "tbl_tenants",
+        "*",
+        "custom_domain = ? AND custom_domain_status = 'verified'",
+        [cleanHostname]
+      );
+
+      if (customDomainTenant && customDomainTenant.length > 0) {
+        tenant = customDomainTenant[0];
+        matchType = "custom_domain";
+        console.log(`✅ [Bydomain] Found tenant by custom_domain: ${tenant.id}`);
+      }
+    }
+
+    // ========== CHECK 4: Custom Domain from tbl_settings (fallback) ==========
+    if (!tenant) {
+      console.log(`🔍 [Bydomain] Checking custom domain in tbl_settings: ${cleanHostname}`);
+
       const customDomainSettings = await db.query(
         `SELECT s.*, t.* 
          FROM tbl_settings s
          INNER JOIN tbl_tenants t ON s.tenant_id = t.id
          WHERE s.primary_domain_name = ? 
-         AND s.dns_status = 'verified'
-         AND s.domain_type = 'custom_domain'`,
+         AND s.dns_status = 'verified'`,
         [cleanHostname]
       );
 
       if (customDomainSettings && customDomainSettings.length > 0) {
         tenant = customDomainSettings[0];
-        matchType = "custom_domain";
-        console.log(`✅ [Bydomain] Found tenant by custom domain: ${tenant.id}`);
+        matchType = "custom_domain_settings";
+        console.log(`✅ [Bydomain] Found tenant via tbl_settings: ${tenant.id}`);
       }
     }
 
@@ -101,13 +117,13 @@ async function Bydomain(req, res) {
       hostname: cleanHostname,
       tenant: {
         id: tenant.id,
-        name: tenant.name || tenant.site_name,
+        name: tenant.store_name || tenant.site_name,
         email: tenant.email,
-        domain: matchType === "subdomain" ? tenant.domain : cleanHostname,
+        domain: tenant.domain,
         template_id: tenant.template_id,
         subdomain: tenant.domain,
-        custom_domain: matchType === "custom_domain" ? cleanHostname : null,
-        dns_status: tenant.dns_status || null,
+        custom_domain: tenant.custom_domain || cleanHostname,
+        custom_domain_status: tenant.custom_domain_status,
       },
     });
   } catch (error) {
@@ -146,7 +162,20 @@ async function getTenantSiteData(req, res) {
       }
     }
 
-    // Check custom domain
+    // Check custom domain in tbl_tenants
+    if (!tenantId) {
+      const customTenant = await db.selectAll(
+        "tbl_tenants",
+        "id",
+        "custom_domain = ? AND custom_domain_status = 'verified'",
+        [cleanHostname]
+      );
+      if (customTenant && customTenant.length > 0) {
+        tenantId = customTenant[0].id;
+      }
+    }
+
+    // Check custom domain in tbl_settings (fallback)
     if (!tenantId) {
       const settings = await db.selectAll(
         "tbl_settings",
