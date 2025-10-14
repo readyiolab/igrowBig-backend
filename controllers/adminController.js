@@ -489,7 +489,7 @@ const UpdateTenantSettings = [
   upload.fields([{ name: "site_logo", maxCount: 1 }]),
   body("domain_type")
     .optional()
-    .isIn(["sub_domain", "custom_domain"]) // FIXED: Changed from "path" and "primary_domain"
+    .isIn(["sub_domain", "custom_domain"])
     .withMessage("Domain type must be 'sub_domain' or 'custom_domain'"),
   body("custom_domain")
     .optional()
@@ -549,7 +549,27 @@ const UpdateTenantSettings = [
       if (domain_type === "custom_domain" && custom_domain) {
         const normalizedCustomDomain = custom_domain.trim().toLowerCase();
 
-        // Check if already taken
+        // ✅ CHECK IF DOMAIN IS ALREADY VERIFIED
+        if (tenantData.custom_domain === normalizedCustomDomain && 
+            tenantData.custom_domain_status === "verified") {
+          return res.status(200).json({
+            success: true,
+            message: "Domain is already verified",
+            settings: {
+              ...currentSettings,
+              subdomain: tenantData.domain,
+              custom_domain: tenantData.custom_domain,
+              custom_domain_status: tenantData.custom_domain_status,
+            },
+            verification: {
+              status: "verified",
+              domain: normalizedCustomDomain,
+              message: "This domain is already verified and active"
+            }
+          });
+        }
+
+        // Check if already taken by another tenant
         const domainExists = await db.selectAll(
           "tbl_tenants",
           "id",
@@ -559,7 +579,7 @@ const UpdateTenantSettings = [
         if (domainExists.length > 0) {
           return res.status(400).json({
             error: "DOMAIN_EXISTS",
-            message: "Domain already taken",
+            message: "Domain already taken by another tenant",
           });
         }
 
@@ -647,7 +667,7 @@ const UpdateTenantSettings = [
             : tenantData.domain,
         website_link: websiteLink || currentSettings.website_link,
         dns_status: dnsStatus,
-        ...otherFields, // Include all other fields from request
+        ...otherFields,
         updated_at: timestamp,
       };
 
@@ -710,6 +730,7 @@ const UpdateTenantSettings = [
       ]);
 
       const response = {
+        success: true,
         message: "Settings updated successfully",
         settings: {
           ...updatedSettings[0],
@@ -730,7 +751,6 @@ const UpdateTenantSettings = [
     }
   },
 ];
-
 // Admin Signup
 const AdminSignup = [
   body("email").isEmail().withMessage("Please enter a valid email address"),

@@ -107,7 +107,6 @@ const UpdateSettings = [
     .optional()
     .custom((value) => {
       if (!value) return true;
-      // Validate domain format
       const domainRegex = /^(?!:\/\/)([a-zA-Z0-9-_]+\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\.[a-zA-Z]{2,11}?$/;
       return domainRegex.test(value);
     })
@@ -188,6 +187,26 @@ const UpdateSettings = [
           return res.status(400).json({
             error: "INVALID_DOMAIN",
             message: "Cannot use platform domain as custom domain",
+          });
+        }
+
+        // ✅ CHECK IF DOMAIN IS ALREADY VERIFIED
+        if (tenantData.custom_domain === normalizedCustomDomain && 
+            tenantData.custom_domain_status === "verified") {
+          return res.status(200).json({
+            success: true,
+            message: "Domain is already verified",
+            settings: {
+              ...currentSettings,
+              subdomain: tenantData.domain,
+              custom_domain: tenantData.custom_domain,
+              custom_domain_status: tenantData.custom_domain_status,
+            },
+            verification: {
+              status: "verified",
+              domain: normalizedCustomDomain,
+              message: "Your domain is already verified and active"
+            }
           });
         }
 
@@ -415,6 +434,7 @@ const UpdateSettings = [
     }
   },
 ];
+
 
 module.exports = {
   GetSettings,

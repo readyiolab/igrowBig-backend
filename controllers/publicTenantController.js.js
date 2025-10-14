@@ -6,8 +6,10 @@ const db = require("../config/db");
  */
 async function Bydomain(req, res) {
   try {
-    // Get the requesting hostname
-    const hostname = req.get("host")?.toLowerCase() || req.get("x-forwarded-host")?.toLowerCase();
+    // Get the requesting hostname - prioritize X-Tenant-Domain header for cross-domain API calls
+    let hostname = req.get("X-Tenant-Domain")?.toLowerCase() || 
+                   req.get("host")?.toLowerCase() || 
+                   req.get("x-forwarded-host")?.toLowerCase();
     
     if (!hostname) {
       return res.status(400).json({
@@ -17,6 +19,8 @@ async function Bydomain(req, res) {
     }
 
     console.log(`🔍 [Bydomain] Incoming request for hostname: ${hostname}`);
+    console.log(`🔍 [Bydomain] X-Tenant-Domain header: ${req.get("X-Tenant-Domain") || "not set"}`);
+    console.log(`🔍 [Bydomain] Host header: ${req.get("host") || "not set"}`);
 
     const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
     
@@ -24,13 +28,14 @@ async function Bydomain(req, res) {
     const cleanHostname = hostname.split(':')[0];
 
     // ========== CHECK 1: Main Domain (Landing Page) ==========
+    // Only reject if it's actually the main domain AND no X-Tenant-Domain header
     const isMainDomain = [
       baseDomain,
       `www.${baseDomain}`,
       "localhost"
     ].includes(cleanHostname);
 
-    if (isMainDomain) {
+    if (isMainDomain && !req.get("X-Tenant-Domain")) {
       return res.status(400).json({
         error: "MAIN_DOMAIN",
         message: "This is the main domain, not a tenant site",
@@ -141,28 +146,23 @@ async function Bydomain(req, res) {
  */
 async function getTenantSiteData(req, res) {
   try {
-    const hostname = req.get("host")?.toLowerCase() || req.get("x-forwarded-host")?.toLowerCase();
-    
-    if (!hostname) {
-      return res.status(400).json({ error: "Missing hostname" });
-    }
+    const hostname = req.get("X-Tenant-Domain")?.toLowerCase() ||
+                     req.get("host")?.toLowerCase() ||
+                     req.get("x-forwarded-host")?.toLowerCase();
+
+    if (!hostname) return res.status(400).json({ error: "Missing hostname" });
 
     const cleanHostname = hostname.split(':')[0];
-    console.log(`🔍 [getTenantSiteData] Fetching data for: ${cleanHostname}`);
-
     const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
     let tenantId = null;
 
-    // Check subdomain
+    // ===== Determine tenantId =====
     if (cleanHostname.endsWith(`.${baseDomain}`)) {
       const subdomain = cleanHostname.replace(`.${baseDomain}`, "");
       const tenant = await db.selectAll("tbl_tenants", "id", "domain = ?", [`${subdomain}.${baseDomain}`]);
-      if (tenant && tenant.length > 0) {
-        tenantId = tenant[0].id;
-      }
+      if (tenant?.length) tenantId = tenant[0].id;
     }
 
-    // Check custom domain in tbl_tenants
     if (!tenantId) {
       const customTenant = await db.selectAll(
         "tbl_tenants",
@@ -170,12 +170,9 @@ async function getTenantSiteData(req, res) {
         "custom_domain = ? AND custom_domain_status = 'verified'",
         [cleanHostname]
       );
-      if (customTenant && customTenant.length > 0) {
-        tenantId = customTenant[0].id;
-      }
+      if (customTenant?.length) tenantId = customTenant[0].id;
     }
 
-    // Check custom domain in tbl_settings (fallback)
     if (!tenantId) {
       const settings = await db.selectAll(
         "tbl_settings",
@@ -183,25 +180,54 @@ async function getTenantSiteData(req, res) {
         "primary_domain_name = ? AND dns_status = 'verified'",
         [cleanHostname]
       );
-      if (settings && settings.length > 0) {
-        tenantId = settings[0].tenant_id;
-      }
+      if (settings?.length) tenantId = settings[0].tenant_id;
     }
 
-    if (!tenantId) {
-      return res.status(404).json({ error: "Tenant not found" });
-    }
+    if (!tenantId) return res.status(404).json({ error: "Tenant not found" });
 
-    // Fetch all site data
-    const [tenant, settings, sliders, products, categories, blogs] = await Promise.all([
+    // ===== Fetch all main site data in parallel =====
+    const [
+      tenant,
+      settings,
+      sliders,
+      products,
+      categories,
+      blogs,
+      homePage,
+      aboutProductPage,
+      productPage,
+      joinUsPage,
+      opportunityPage,
+      socialLinks
+    ] = await Promise.all([
       db.selectAll("tbl_tenants", "*", "id = ?", [tenantId]),
       db.selectAll("tbl_settings", "*", "tenant_id = ?", [tenantId]),
       db.selectAll("tbl_slider_banners", "*", "tenant_id = ?", [tenantId]),
       db.selectAll("tbl_products", "*", "tenant_id = ? AND status = 'active'", [tenantId]),
       db.selectAll("tbl_categories", "*", "tenant_id = ? AND status = 'active'", [tenantId]),
-      db.selectAll("tbl_blogs", "*", "tenant_id = ? AND status = 'published'", [tenantId]),
+      db.selectAll("tbl_blogs", "*", "tenant_id = ? AND is_visible = 1", [tenantId]),
+      db.select("tbl_home_pages", "*", `tenant_id = ${tenantId}`),
+      db.select("tbl_about_product_pages", "*", `tenant_id = ${tenantId}`),
+      db.select("tbl_product_page", "*", `tenant_id = ${tenantId}`),
+      db.select("tbl_joinus_page", "*", `tenant_id = ${tenantId}`),
+      db.select("tbl_opportunity_page", "*", `tenant_id = ${tenantId}`),
+      db.selectAll("tbl_footer_social_links", "*", "tenant_id = ?", [tenantId]),
     ]);
 
+    // ===== Fetch blog banners in parallel =====
+    const blogBannerPromises = blogs.map(blog =>
+      db.selectAll(
+        "tbl_blog_page_banners",
+        "*",
+        `blog_id = ${blog.id} AND tenant_id = ${tenantId}`
+      ).then(banners => {
+        blog.banners = banners;
+      })
+    );
+
+    await Promise.all(blogBannerPromises);
+
+    // ===== Return full tenant site data =====
     return res.json({
       success: true,
       tenant: tenant[0],
@@ -210,7 +236,14 @@ async function getTenantSiteData(req, res) {
       products,
       categories,
       blogs,
+      homePage: homePage || {},
+      aboutProductPage: aboutProductPage || {},
+      productPage: productPage || {},
+      joinUsPage: joinUsPage || {},
+      opportunityPage: opportunityPage || {},
+      socialLinks: socialLinks[0] || {},
     });
+
   } catch (error) {
     console.error("❌ [getTenantSiteData] Error:", error);
     return res.status(500).json({ error: error.message });
