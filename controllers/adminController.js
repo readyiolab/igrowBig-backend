@@ -986,6 +986,7 @@ const UpdateUserStatus = [
     }
   },
 ];
+
 // Reset User Password
 const ResetUserPassword = [
   body("new_password")
@@ -1005,6 +1006,7 @@ const ResetUserPassword = [
         });
       }
 
+      // Check if user exists
       const user = await db.select("tbl_users", "*", "id = ? AND email = ?", [
         user_id,
         tenant_email,
@@ -1017,6 +1019,7 @@ const ResetUserPassword = [
         });
       }
 
+      // Hash new password
       const hashedPassword = await bcrypt.hash(new_password, 10);
       const result = await db.update(
         "tbl_users",
@@ -1031,29 +1034,39 @@ const ResetUserPassword = [
         });
       }
 
-      // Fetch tenant data to construct store_url
+      // Fetch tenant data (domain and custom_domain)
       const tenant = await db.select(
         "tbl_tenants",
-        "slug, domain",
+        "domain, custom_domain, custom_domain_status, plan",
         "user_id = ?",
         [user_id]
       );
       const tenantData = normalizeResult(tenant);
-      const baseDomain = "igrowbig.com";
-      const protocol = "http";
-      const store_url = tenantData?.slug
-        ? `${protocol}://${baseDomain}/${tenantData.slug}`
-        : `${protocol}://${baseDomain}/default-store`;
-      const login_url = `${protocol}://${baseDomain}/backoffice-login`;
 
+      // Construct base URL dynamically
+      const protocol = "https";
+      let store_url;
+
+      if (tenantData?.custom_domain && tenantData.custom_domain_status === "active") {
+        // Use custom domain if verified
+        store_url = `${protocol}://${tenantData.custom_domain}`;
+      } else if (tenantData?.domain) {
+        // Use tenant's igrowbig subdomain
+        store_url = `${protocol}://${tenantData.domain}`;
+      } else {
+        // Fallback
+        store_url = `${protocol}://igrowbig.com/default-store`;
+      }
+
+      const login_url = `${protocol}://igrowbig.com/backoffice-login`;
+
+      // Send email notification
       await sendPasswordResetEmail(tenant_email, {
         email: tenant_email,
         password: new_password,
         name: userData.name || "User",
-        subscription_plan: userData.subscription_plan || "yearly",
-        subscription_status: userData.subscription_status
-          ? "Active"
-          : "Inactive",
+        subscription_plan: tenantData?.plan || "basic",
+        subscription_status: userData.subscription_status ? "Active" : "Inactive",
         login_url,
         store_url,
       });
@@ -1071,6 +1084,7 @@ const ResetUserPassword = [
     }
   },
 ];
+
 
 // Send Tenant Notification
 const SendTenantNotification = [

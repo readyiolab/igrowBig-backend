@@ -41,10 +41,14 @@ const UpsertSocialLinks = async (req, res) => {
 
     if (existingLinks.length > 0) {
       await db.update("tbl_footer_social_links", socialData, "tenant_id = ?", [tenantId]);
-      res.json({ message: "Social links updated" });
+      // Return the updated data
+      const updatedLinks = await db.selectAll("tbl_footer_social_links", "*", "tenant_id = ?", [tenantId]);
+      res.json({ message: "Social links updated", data: updatedLinks[0] });
     } else {
       const result = await db.insert("tbl_footer_social_links", socialData);
-      res.status(201).json({ message: "Social links added", id: result.insert_id });
+      // Return the newly created data
+      const newLinks = await db.selectAll("tbl_footer_social_links", "*", "id = ?", [result.insert_id]);
+      res.status(201).json({ message: "Social links added", id: result.insert_id, data: newLinks[0] });
     }
   } catch (err) {
     console.error("Error in UpsertSocialLinks:", err);
@@ -113,10 +117,14 @@ const UpsertDisclaimers = async (req, res) => {
 
     if (existingDisclaimers.length > 0) {
       await db.update("tbl_footer_disclaimers", disclaimerData, "tenant_id = ?", [tenantId]);
-      res.json({ message: "Disclaimers updated" });
+      // Return the updated data
+      const updatedDisclaimers = await db.selectAll("tbl_footer_disclaimers", "*", "tenant_id = ?", [tenantId]);
+      res.json({ message: "Disclaimers updated", data: updatedDisclaimers[0] });
     } else {
       const result = await db.insert("tbl_footer_disclaimers", disclaimerData);
-      res.status(201).json({ message: "Disclaimers added", id: result.insert_id });
+      // Return the newly created data
+      const newDisclaimers = await db.selectAll("tbl_footer_disclaimers", "*", "id = ?", [result.insert_id]);
+      res.status(201).json({ message: "Disclaimers added", id: result.insert_id, data: newDisclaimers[0] });
     }
   } catch (err) {
     console.error("Error in UpsertDisclaimers:", err);

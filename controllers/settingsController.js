@@ -85,10 +85,62 @@ const GetSettings = [
         custom_domain_status: tenantData.custom_domain_status,
       };
 
-      res.status(200).json({
+      const response = {
         message: "Settings retrieved successfully",
         settings: enrichedSettings,
-      });
+      };
+
+      // ✅ CRITICAL: If custom domain is pending, fetch and return verification data
+      if (tenantData.custom_domain && tenantData.custom_domain_status === "pending") {
+        try {
+          const verificationRecords = await db.selectAll(
+            "tbl_domain_verifications",
+            "*",
+            "tenant_id = ? AND domain = ? ORDER BY created_at DESC LIMIT 1",
+            [tenantId, tenantData.custom_domain]
+          );
+
+          if (verificationRecords.length > 0) {
+            const verification = verificationRecords[0];
+            const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
+            const serverIP = process.env.SERVER_IP || "139.59.8.68";
+
+            response.verification = {
+              status: "pending",
+              token: verification.verification_token,
+              domain: tenantData.custom_domain,
+              note: "Configure your DNS records to verify domain ownership and point traffic to our platform.",
+              message: "Your domain verification is pending. Please configure DNS records below.",
+              instructions: {
+                step1: {
+                  title: "Step 1: Verify Domain Ownership (Add This First)",
+                  type: "TXT",
+                  host: `_igrowbig-verification.${tenantData.custom_domain}`,
+                  value: verification.verification_token,
+                  description: "Add this TXT record to verify you own this domain. Verification happens automatically."
+                },
+                step2: {
+                  title: "Step 2: Point Domain to Platform (CNAME - Recommended)",
+                  type: "CNAME",
+                  host: tenantData.custom_domain.replace(/^www\./, ''),
+                  value: baseDomain,
+                  description: "This routes your domain traffic to our platform. Add after verification."
+                },
+                step3_alternative: {
+                  title: "Step 3: Alternative - Use A Record Instead",
+                  type: "A",
+                  value: serverIP,
+                  description: "If your DNS provider doesn't support CNAME for root domain, use this A record instead."
+                }
+              }
+            };
+          }
+        } catch (verificationError) {
+          console.error("Failed to fetch verification data:", verificationError);
+        }
+      }
+
+      res.status(200).json(response);
     } catch (error) {
       console.error("GetSettings Error:", error);
       res.status(500).json({

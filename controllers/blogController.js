@@ -1,13 +1,27 @@
 const db = require("../config/db");
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 const { checkTenantAuth } = require("../middleware/authMiddleware");
 const { uploadToS3, deleteFromS3 } = require("../services/awsS3");
+
+// Helper function to safely delete temporary files
+const safeUnlink = (filePath) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch (err) {
+    console.error(`Error deleting file ${filePath}:`, err.message);
+  }
+};
 
 // Multer setup for disk storage (temporary local files)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, "uploads/"); // Temporary folder for uploads
+    const tempDir = path.join(__dirname, "../uploads/temp");
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    cb(null, tempDir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
@@ -27,12 +41,6 @@ const upload = multer({
   },
 }).single("image");
 
-// Ensure the uploads directory exists
-const fs = require("fs");
-if (!fs.existsSync("uploads/")) {
-  fs.mkdirSync("uploads/");
-}
-
 // Add Blog (tbl_blogs)
 const AddBlog = async (req, res) => {
   upload(req, res, async (err) => {
@@ -51,6 +59,7 @@ const AddBlog = async (req, res) => {
       let imageUrl = null;
       if (req.file) {
         imageUrl = await uploadToS3(req.file, `tenant_${tenantId}/blogs`);
+        safeUnlink(req.file.path);
       }
 
       const blogData = {
@@ -66,10 +75,12 @@ const AddBlog = async (req, res) => {
       res.status(201).json({ message: "Blog added", blog_id: blogId });
     } catch (err) {
       console.error("Error in AddBlog:", err);
+      if (req.file) safeUnlink(req.file.path);
       res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
     }
   });
 };
+
 // Get Blogs (tbl_blogs) with associated banners (tbl_blog_page_banners)
 const GetBlogs = async (req, res) => {
   const { tenantId } = req.params;
@@ -113,13 +124,16 @@ const UpdateBlog = async (req, res) => {
 
     try {
       const existingBlog = await db.selectAll("tbl_blogs", "*", `id = ${blogId} AND tenant_id = ${tenantId}`);
-      if (!existingBlog || existingBlog.length === 0)
+      if (!existingBlog || existingBlog.length === 0) {
+        if (req.file) safeUnlink(req.file.path);
         return res.status(404).json({ error: "BLOG_NOT_FOUND", message: "Blog not found" });
+      }
 
       let imageUrl = existingBlog[0].image_url;
       if (req.file) {
         if (imageUrl) await deleteFromS3(imageUrl);
-        imageUrl = await uploadToS3(req.file, `blogs/${tenantId}`);
+        imageUrl = await uploadToS3(req.file, `tenant_${tenantId}/blogs`);
+        safeUnlink(req.file.path);
       }
 
       const blogUpdateData = {};
@@ -135,6 +149,7 @@ const UpdateBlog = async (req, res) => {
       res.json({ message: "Blog updated" });
     } catch (err) {
       console.error("Error in UpdateBlog:", err);
+      if (req.file) safeUnlink(req.file.path);
       res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
     }
   });
@@ -186,7 +201,9 @@ const AddBlogBanner = async (req, res) => {
       return res.status(400).json({ error: "MISSING_IMAGE", message: "Banner image is required" });
 
     try {
-      const imageUrl = await uploadToS3(req.file, `blogs/${tenantId}`);
+      const imageUrl = await uploadToS3(req.file, `tenant_${tenantId}/blogs`);
+      safeUnlink(req.file.path);
+      
       const bannerData = {
         tenant_id: tenantId,
         blog_id: blogId,
@@ -197,6 +214,7 @@ const AddBlogBanner = async (req, res) => {
       res.status(201).json({ message: "Blog banner added", banner_id: result.insert_id });
     } catch (err) {
       console.error("Error in AddBlogBanner:", err);
+      if (req.file) safeUnlink(req.file.path);
       res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
     }
   });
@@ -219,13 +237,16 @@ const UpdateBlogBanner = async (req, res) => {
         "*",
         `id = ${bannerId} AND blog_id = ${blogId} AND tenant_id = ${tenantId}`
       );
-      if (!existingBanner || existingBanner.length === 0)
+      if (!existingBanner || existingBanner.length === 0) {
+        if (req.file) safeUnlink(req.file.path);
         return res.status(404).json({ error: "BANNER_NOT_FOUND", message: "Banner not found" });
+      }
 
       let imageUrl = existingBanner[0].image_url;
       if (req.file) {
         if (imageUrl) await deleteFromS3(imageUrl);
-        imageUrl = await uploadToS3(req.file, `blogs/${tenantId}`);
+        imageUrl = await uploadToS3(req.file, `tenant_${tenantId}/blogs`);
+        safeUnlink(req.file.path);
       }
 
       const bannerData = {
@@ -240,6 +261,7 @@ const UpdateBlogBanner = async (req, res) => {
       res.json({ message: "Blog banner updated" });
     } catch (err) {
       console.error("Error in UpdateBlogBanner:", err);
+      if (req.file) safeUnlink(req.file.path);
       res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
     }
   });

@@ -5,6 +5,17 @@ const fs = require("fs");
 const { checkTenantAuth } = require("../middleware/authMiddleware");
 const { uploadToS3, deleteFromS3 } = require("../services/awsS3");
 
+// Helper function to safely delete temporary files
+const safeUnlink = (filePath) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch (err) {
+    console.error(`Error deleting file ${filePath}:`, err.message);
+  }
+};
+
 // Configure multer for temporary local storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {

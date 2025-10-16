@@ -3,9 +3,22 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { checkTenantAuth } = require("../middleware/authMiddleware");
-const { uploadToS3, deleteFromS3 } = require("../services/awsS3"); // Adjust path as needed
+const { uploadToS3, deleteFromS3 } = require("../services/awsS3");
 require("dotenv").config();
 
+// ✅ Safe file deletion helper
+const safeUnlink = (filePath) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`Deleted local file: ${filePath}`);
+    }
+  } catch (err) {
+    console.error("Error deleting local file:", err);
+  }
+};
+
+// Multer storage configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadBaseDir = path.join(__dirname, "../uploads");
@@ -87,22 +100,6 @@ const AddHomePage = async (req, res) => {
         return res.status(400).json({
           error: "PAGE_EXISTS",
           message: "Home page already exists for this tenant. Use update instead.",
-        });
-      }
-
-      if (
-        !welcome_description ||
-        !introduction_content ||
-        !about_company_title ||
-        !about_company_content_1 ||
-        !why_network_marketing_title ||
-        !why_network_marketing_content ||
-        !opportunity_video_header_title ||
-        !support_content
-      ) {
-        return res.status(400).json({
-          error: "MISSING_FIELDS",
-          message: "All required fields must be provided",
         });
       }
 
@@ -213,10 +210,6 @@ const UpdateHomePage = async (req, res) => {
           homePageData.opportunity_video_url = await uploadToS3(file, `tenant_${tenantId}/homepage_opportunity`);
           safeUnlink(file.path);
         }
-      }
-
-      if (Object.keys(homePageData).length === 0) {
-        return res.status(400).json({ error: "NO_DATA", message: "No data provided to update" });
       }
 
       await db.update("tbl_home_pages", homePageData, `tenant_id = ${tenantId}`);
