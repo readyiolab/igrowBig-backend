@@ -212,6 +212,7 @@ async function getTenantSiteData(req, res) {
       db.select("tbl_joinus_page", "*", `tenant_id = ${tenantId}`),
       db.select("tbl_opportunity_page", "*", `tenant_id = ${tenantId}`),
       db.selectAll("tbl_footer_social_links", "*", "tenant_id = ?", [tenantId]),
+      db.selectAll("tbl_footer_disclaimers", "*", "tenant_id = ?", [tenantId]),
     ]);
 
     // ===== Fetch blog banners in parallel =====

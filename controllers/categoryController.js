@@ -5,6 +5,17 @@ const fs = require("fs");
 const { checkTenantAuth } = require("../middleware/authMiddleware");
 const { uploadToS3, deleteFromS3 } = require("../services/awsS3");
 
+// Helper to safely delete a file
+const safeUnlink = (filePath) => {
+  try {
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch (err) {
+    console.error("Error deleting file:", err);
+  }
+};
+
 // Configure multer for temporary local storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -72,7 +83,7 @@ const AddCategory = async (req, res) => {
       let imageUrl = null;
       if (req.file) {
         imageUrl = await uploadToS3(req.file, folder);
-        safeUnlink(req.file.path);
+        safeUnlink(req.file.path); // Safe delete
       }
 
       const categoryData = {
@@ -94,22 +105,6 @@ const AddCategory = async (req, res) => {
       });
     }
   });
-};
-
-// Get Categories
-const GetCategories = async (req, res) => {
-  const { tenantId } = req.params;
-  if (!checkTenantAuth(req, tenantId)) {
-    return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
-  }
-
-  try {
-    const categories = await db.selectAll("tbl_categories", "*", `tenant_id = ${tenantId}`);
-    res.json(categories);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
-  }
 };
 
 // Update Category
@@ -136,7 +131,6 @@ const UpdateCategory = async (req, res) => {
         return res.status(404).json({ error: "CATEGORY_NOT_FOUND", message: "Category not found" });
       }
 
-      // Prepare folder name dynamically
       const safeName = (name || existingCategory.name).replace(/[^a-zA-Z0-9]/g, "-").toLowerCase();
       const folder = `categories/${safeName}_${tenantId}`;
 
@@ -147,18 +141,12 @@ const UpdateCategory = async (req, res) => {
       };
 
       if (req.file) {
-        // Delete old image from S3 if it exists
         if (existingCategory.image_url) {
           await deleteFromS3(existingCategory.image_url);
         }
-        // Upload new image to S3
         updateData.image_url = await uploadToS3(req.file, folder);
-        // Clean up temporary file
-        const tempFilePath = req.file.path;
-        if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+        safeUnlink(req.file.path); // Safe delete
       }
-
-      console.log("Updating category with data:", updateData);
 
       const result = await db.update(
         "tbl_categories",
@@ -200,13 +188,28 @@ const DeleteCategory = async (req, res) => {
       return res.status(404).json({ error: "CATEGORY_NOT_FOUND", message: "Category not found" });
     }
 
-    // Delete image from S3 if it exists
     if (category.image_url) {
       await deleteFromS3(category.image_url);
     }
 
     await db.delete("tbl_categories", `id = ${categoryId} AND tenant_id = ${tenantId}`);
     res.json({ message: "Category deleted" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
+  }
+};
+
+// Get Categories
+const GetCategories = async (req, res) => {
+  const { tenantId } = req.params;
+  if (!checkTenantAuth(req, tenantId)) {
+    return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
+  }
+
+  try {
+    const categories = await db.selectAll("tbl_categories", "*", `tenant_id = ${tenantId}`);
+    res.json(categories);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
