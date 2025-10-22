@@ -176,16 +176,16 @@ const UpdateHomePage = async (req, res) => {
       if (!existingPage) {
         const homePageData = {
           tenant_id: tenantId,
-          welcome_description: welcome_description || null,
-          introduction_content: introduction_content || null,
-          about_company_title: about_company_title || null,
-          about_company_content_1: about_company_content_1 || null,
+          welcome_description: welcome_description || "",
+          introduction_content: introduction_content || "",
+          about_company_title: about_company_title || "",
+          about_company_content_1: about_company_content_1 || "",
           about_company_content_2: about_company_content_2 || null,
-          why_network_marketing_title: why_network_marketing_title || null,
-          why_network_marketing_content: why_network_marketing_content || null,
-          opportunity_video_header_title: opportunity_video_header_title || null,
+          why_network_marketing_title: why_network_marketing_title || "",
+          why_network_marketing_content: why_network_marketing_content || "",
+          opportunity_video_header_title: opportunity_video_header_title || "",
           opportunity_video_url: youtube_link || null,
-          support_content: support_content || null,
+          support_content: support_content || "",
         };
 
         // Handle file uploads for new record
