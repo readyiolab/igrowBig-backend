@@ -121,14 +121,17 @@ const AddHomePage = async (req, res) => {
         if (req.files.introduction_image) {
           const file = req.files.introduction_image[0];
           homePageData.introduction_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_introduction`);
+          safeUnlink(file.path);
         }
         if (req.files.about_company_image) {
           const file = req.files.about_company_image[0];
           homePageData.about_company_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
+          safeUnlink(file.path);
         }
         if (req.files.opportunity_video) {
           const file = req.files.opportunity_video[0];
           homePageData.opportunity_video_url = await uploadToS3(file, `tenant_${tenantId}/homepage_opportunity`);
+          safeUnlink(file.path);
         }
       }
 
@@ -141,7 +144,7 @@ const AddHomePage = async (req, res) => {
   });
 };
 
-// Update Home Page
+// ✅ FIXED: Update Home Page (with Upsert Logic)
 const UpdateHomePage = async (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -168,10 +171,51 @@ const UpdateHomePage = async (req, res) => {
 
     try {
       const existingPage = await db.select("tbl_home_pages", "*", `tenant_id = ${tenantId}`);
+      
+      // ✅ IF NO PAGE EXISTS, CREATE ONE
       if (!existingPage) {
-        return res.status(404).json({ error: "PAGE_NOT_FOUND", message: "Home page not found" });
+        const homePageData = {
+          tenant_id: tenantId,
+          welcome_description: welcome_description || null,
+          introduction_content: introduction_content || null,
+          about_company_title: about_company_title || null,
+          about_company_content_1: about_company_content_1 || null,
+          about_company_content_2: about_company_content_2 || null,
+          why_network_marketing_title: why_network_marketing_title || null,
+          why_network_marketing_content: why_network_marketing_content || null,
+          opportunity_video_header_title: opportunity_video_header_title || null,
+          opportunity_video_url: youtube_link || null,
+          support_content: support_content || null,
+        };
+
+        // Handle file uploads for new record
+        if (req.files) {
+          if (req.files.introduction_image) {
+            const file = req.files.introduction_image[0];
+            homePageData.introduction_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_introduction`);
+            safeUnlink(file.path);
+          }
+          if (req.files.about_company_image) {
+            const file = req.files.about_company_image[0];
+            homePageData.about_company_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
+            safeUnlink(file.path);
+          }
+          if (req.files.opportunity_video) {
+            const file = req.files.opportunity_video[0];
+            homePageData.opportunity_video_url = await uploadToS3(file, `tenant_${tenantId}/homepage_opportunity`);
+            safeUnlink(file.path);
+          }
+        }
+
+        const result = await db.insert("tbl_home_pages", homePageData);
+        return res.status(201).json({ 
+          message: "Home page created successfully", 
+          page_id: result.insert_id,
+          data: homePageData 
+        });
       }
 
+      // ✅ PAGE EXISTS - UPDATE IT
       const homePageData = {
         welcome_description: welcome_description || existingPage.welcome_description,
         introduction_content: introduction_content || existingPage.introduction_content,
@@ -213,7 +257,7 @@ const UpdateHomePage = async (req, res) => {
       }
 
       await db.update("tbl_home_pages", homePageData, `tenant_id = ${tenantId}`);
-      res.json({ message: "Home page updated", data: homePageData });
+      res.json({ message: "Home page updated successfully", data: homePageData });
     } catch (err) {
       console.error("Error in UpdateHomePage:", err);
       res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
