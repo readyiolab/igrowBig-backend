@@ -69,6 +69,20 @@ const upload = multer({
   { name: "opportunity_video", maxCount: 1 },
 ]);
 
+// ✅ DEFAULT VALUES for required fields
+const getDefaultValues = () => ({
+  welcome_description: "Welcome to our platform",
+  introduction_content: "Learn more about our opportunity",
+  about_company_title: "About Our Company",
+  about_company_content_1: "We are committed to excellence",
+  about_company_content_2: "",
+  why_network_marketing_title: "Why Network Marketing",
+  why_network_marketing_content: "Discover the benefits of network marketing",
+  opportunity_video_header_title: "Watch Our Opportunity Video",
+  opportunity_video_url: "",
+  support_content: "Contact us for support",
+});
+
 // Add Home Page
 const AddHomePage = async (req, res) => {
   upload(req, res, async (err) => {
@@ -144,7 +158,7 @@ const AddHomePage = async (req, res) => {
   });
 };
 
-// ✅ FIXED: Update Home Page (with Upsert Logic)
+// ✅ UPDATED: Update Home Page (Smart Partial Updates)
 const UpdateHomePage = async (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -172,20 +186,22 @@ const UpdateHomePage = async (req, res) => {
     try {
       const existingPage = await db.select("tbl_home_pages", "*", `tenant_id = ${tenantId}`);
       
-      // ✅ IF NO PAGE EXISTS, CREATE ONE
+      // ✅ IF NO PAGE EXISTS, CREATE ONE WITH DEFAULTS
       if (!existingPage) {
+        const defaults = getDefaultValues();
         const homePageData = {
           tenant_id: tenantId,
-          welcome_description: welcome_description || "",
-          introduction_content: introduction_content || "",
-          about_company_title: about_company_title || "",
-          about_company_content_1: about_company_content_1 || "",
+          // Use provided values OR defaults (never empty/null for required fields)
+          welcome_description: welcome_description || defaults.welcome_description,
+          introduction_content: introduction_content || defaults.introduction_content,
+          about_company_title: about_company_title || defaults.about_company_title,
+          about_company_content_1: about_company_content_1 || defaults.about_company_content_1,
           about_company_content_2: about_company_content_2 || null,
-          why_network_marketing_title: why_network_marketing_title || "",
-          why_network_marketing_content: why_network_marketing_content || "",
-          opportunity_video_header_title: opportunity_video_header_title || "",
+          why_network_marketing_title: why_network_marketing_title || defaults.why_network_marketing_title,
+          why_network_marketing_content: why_network_marketing_content || defaults.why_network_marketing_content,
+          opportunity_video_header_title: opportunity_video_header_title || defaults.opportunity_video_header_title,
           opportunity_video_url: youtube_link || null,
-          support_content: support_content || "",
+          support_content: support_content || defaults.support_content,
         };
 
         // Handle file uploads for new record
@@ -215,20 +231,22 @@ const UpdateHomePage = async (req, res) => {
         });
       }
 
-      // ✅ PAGE EXISTS - UPDATE IT
-      const homePageData = {
-        welcome_description: welcome_description || existingPage.welcome_description,
-        introduction_content: introduction_content || existingPage.introduction_content,
-        about_company_title: about_company_title || existingPage.about_company_title,
-        about_company_content_1: about_company_content_1 || existingPage.about_company_content_1,
-        about_company_content_2: about_company_content_2 || existingPage.about_company_content_2 || null,
-        why_network_marketing_title: why_network_marketing_title || existingPage.why_network_marketing_title,
-        why_network_marketing_content: why_network_marketing_content || existingPage.why_network_marketing_content,
-        opportunity_video_header_title: opportunity_video_header_title || existingPage.opportunity_video_header_title,
-        opportunity_video_url: youtube_link || existingPage.opportunity_video_url || null,
-        support_content: support_content || existingPage.support_content,
-      };
+      // ✅ PAGE EXISTS - SMART UPDATE (only update fields that are provided)
+      const homePageData = {};
 
+      // Only update fields that are actually provided in the request
+      if (welcome_description !== undefined) homePageData.welcome_description = welcome_description;
+      if (introduction_content !== undefined) homePageData.introduction_content = introduction_content;
+      if (about_company_title !== undefined) homePageData.about_company_title = about_company_title;
+      if (about_company_content_1 !== undefined) homePageData.about_company_content_1 = about_company_content_1;
+      if (about_company_content_2 !== undefined) homePageData.about_company_content_2 = about_company_content_2 || null;
+      if (why_network_marketing_title !== undefined) homePageData.why_network_marketing_title = why_network_marketing_title;
+      if (why_network_marketing_content !== undefined) homePageData.why_network_marketing_content = why_network_marketing_content;
+      if (opportunity_video_header_title !== undefined) homePageData.opportunity_video_header_title = opportunity_video_header_title;
+      if (youtube_link !== undefined) homePageData.opportunity_video_url = youtube_link || null;
+      if (support_content !== undefined) homePageData.support_content = support_content;
+
+      // Handle file uploads
       if (req.files) {
         if (req.files.introduction_image) {
           const file = req.files.introduction_image[0];
@@ -256,7 +274,11 @@ const UpdateHomePage = async (req, res) => {
         }
       }
 
-      await db.update("tbl_home_pages", homePageData, `tenant_id = ${tenantId}`);
+      // Only update if there's something to update
+      if (Object.keys(homePageData).length > 0) {
+        await db.update("tbl_home_pages", homePageData, `tenant_id = ${tenantId}`);
+      }
+
       res.json({ message: "Home page updated successfully", data: homePageData });
     } catch (err) {
       console.error("Error in UpdateHomePage:", err);
