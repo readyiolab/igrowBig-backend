@@ -19,7 +19,7 @@ const {
   startVerificationProcess,
 } = require("../services/domainVerificationService");
 const { copyGlobalProductsToTenant } = require("../utils/productCopy");
-const { createDefaultPagesForTenant } = require("../services/pageSetupService");
+const {createDefaultPagesForTenant} = require("../services/pageSetupService");
 const { sendDomainNotification } = require("../config/email");
 
 // Currency mappings (same as tenant controller)
@@ -213,12 +213,12 @@ const CreateUser = [
         });
       }
 
-      // ✅ FIX: Better query to check products
+      // ✅ FIX: Check products without status filter (adjust based on your schema)
       const productsCheck = await db.query(
         `SELECT COUNT(DISTINCT p.id) as count 
          FROM tbl_products_global p
          INNER JOIN tbl_productpricing pp ON p.id = pp.productId
-         WHERE pp.country = ? AND p.status = 'active'`,
+         WHERE pp.country = ?`,
         [country]
       );
 
@@ -646,10 +646,8 @@ const UpdateTenantSettings = [
         const normalizedCustomDomain = custom_domain.trim().toLowerCase();
 
         // ✅ CHECK IF DOMAIN IS ALREADY VERIFIED
-        if (
-          tenantData.custom_domain === normalizedCustomDomain &&
-          tenantData.custom_domain_status === "verified"
-        ) {
+        if (tenantData.custom_domain === normalizedCustomDomain && 
+            tenantData.custom_domain_status === "verified") {
           return res.status(200).json({
             success: true,
             message: "Domain is already verified",
@@ -662,8 +660,8 @@ const UpdateTenantSettings = [
             verification: {
               status: "verified",
               domain: normalizedCustomDomain,
-              message: "This domain is already verified and active",
-            },
+              message: "This domain is already verified and active"
+            }
           });
         }
 
@@ -1013,6 +1011,7 @@ const AdminchangePassword = async (req, res) => {
   }
 };
 
+
 const GetDomainLogs = async (req, res) => {
   try {
     const { tenantId } = req.params;
@@ -1144,10 +1143,7 @@ const ResetUserPassword = [
       const protocol = "https";
       let store_url;
 
-      if (
-        tenantData?.custom_domain &&
-        tenantData.custom_domain_status === "active"
-      ) {
+      if (tenantData?.custom_domain && tenantData.custom_domain_status === "active") {
         // Use custom domain if verified
         store_url = `${protocol}://${tenantData.custom_domain}`;
       } else if (tenantData?.domain) {
@@ -1166,9 +1162,7 @@ const ResetUserPassword = [
         password: new_password,
         name: userData.name || "User",
         subscription_plan: tenantData?.plan || "basic",
-        subscription_status: userData.subscription_status
-          ? "Active"
-          : "Inactive",
+        subscription_status: userData.subscription_status ? "Active" : "Inactive",
         login_url,
         store_url,
       });
@@ -1186,6 +1180,7 @@ const ResetUserPassword = [
     }
   },
 ];
+
 
 // Send Tenant Notification
 const SendTenantNotification = [
