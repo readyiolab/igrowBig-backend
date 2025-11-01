@@ -198,7 +198,8 @@ async function getTenantSiteData(req, res) {
       productPage,
       joinUsPage,
       opportunityPage,
-      socialLinks
+      socialLinks,
+      disclaimers  
     ] = await Promise.all([
       db.selectAll("tbl_tenants", "*", "id = ?", [tenantId]),
       db.selectAll("tbl_settings", "*", "tenant_id = ?", [tenantId]),
