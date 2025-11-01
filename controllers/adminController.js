@@ -190,9 +190,6 @@ const CreateUser = [
     .isIn(['monthly', 'quarterly'])
     .withMessage('Subscription plan must be "monthly" or "quarterly"'),
   async (req, res) => {
-    let tenantId = null;
-    let userId = null;
-    
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty())
@@ -203,6 +200,7 @@ const CreateUser = [
       // ========== STEP 0: VALIDATE COUNTRY & PRODUCTS FIRST ==========
       console.log(`🔍 Validating country: ${country}`);
       
+      // Check if country exists in pricing table
       const isValidCountry = await validateCountry(country);
       if (!isValidCountry) {
         return res.status(400).json({
@@ -211,6 +209,7 @@ const CreateUser = [
         });
       }
 
+      // Check if products exist for this country
       const productsCount = await db.query(
         `SELECT COUNT(*) as count 
          FROM tbl_products_global p
@@ -278,8 +277,7 @@ const CreateUser = [
       });
       const hashedPassword = await bcrypt.hash(generatedPassword, 10);
 
-      // ========== STEP 1: CREATE TENANT ==========
-      console.log(`📦 Creating tenant...`);
+      // Insert tenant with plan field
       const tenantData = {
         store_name,
         template_id,
@@ -287,17 +285,15 @@ const CreateUser = [
         domain: fullSubdomain,
         custom_domain: null,
         custom_domain_status: "pending",
-        plan: subscription_plan,
+        plan: subscription_plan, // Add the plan field using subscription_plan
         country,
         created_at: timestamp,
         updated_at: timestamp,
       };
       const tenantResult = await db.insert("tbl_tenants", tenantData);
-      tenantId = tenantResult.insert_id;
-      console.log(`✅ Tenant created: ID ${tenantId}`);
+      const tenantId = tenantResult.insert_id;
 
-      // ========== STEP 2: CREATE USER ==========
-      console.log(`👤 Creating user...`);
+      // Insert user
       const userData = {
         name,
         email: normalizedEmail,
@@ -309,13 +305,11 @@ const CreateUser = [
         subscription_plan,
       };
       const userResult = await db.insert("tbl_users", userData);
-      userId = userResult.insert_id;
-      
-      await db.update("tbl_tenants", { user_id: userId }, "id = ?", [tenantId]);
-      console.log(`✅ User created: ID ${userId}`);
+      const userId = userResult.insert_id;
 
-      // ========== STEP 3: CREATE SETTINGS ==========
-      console.log(`⚙️ Creating settings...`);
+      await db.update("tbl_tenants", { user_id: userId }, "id = ?", [tenantId]);
+
+      // Insert settings
       const currency = countryToCurrencyMap[country] || "USD";
       const currencySymbol = currencyMap[currency] || "$";
       
@@ -344,58 +338,76 @@ const CreateUser = [
         updated_at: timestamp,
       };
       await db.insert("tbl_settings", settingsData);
-      console.log(`✅ Settings created`);
 
-      // ========== STEP 4: COPY PRODUCTS (MUST BE BEFORE PAGES) ==========
-      console.log(`📦 Copying products for ${country}...`);
-      const productCopyResult = await copyGlobalProductsToTenant(tenantId, country);
 
-      if (!productCopyResult.success) {
-        throw new Error(productCopyResult.error || "Failed to setup products");
+        // ========== CREATE DEFAULT PAGES FOR ALL SECTIONS ==========
+
+      console.log(`🛠️  Setting up default pages for tenant ${tenantId}...`);
+
+      let pagesSetup = { success: false };
+      try {
+        console.log(`📄 Creating default pages for tenant ${tenantId}...`);
+        pagesSetup = await createDefaultPagesForTenant(tenantId);
+        
+        if (pagesSetup.errors.length > 0) {
+          console.warn(`⚠️ Some pages failed to create:`, pagesSetup.errors);
+        }
+        
+        const pagesCreated = [
+          pagesSetup.homepage && "Homepage",
+          pagesSetup.opportunityPage && "Opportunity",
+          pagesSetup.productPage && "Product"
+        ].filter(Boolean);
+        
+        console.log(`✅ Pages created: ${pagesCreated.join(", ")}`);
+      } catch (error) {
+        console.error("❌ Page setup error:", error.message);
+        // Don't fail user creation if pages fail, just log it
       }
 
-      console.log(`✅ Products copied: ${productCopyResult.products_count} products, ${productCopyResult.categories_count} categories`);
+      // Copy products
+      let productCopyResult = { success: false };
+      try {
+        console.log(`📦 Copying products for ${country}...`);
+        productCopyResult = await copyGlobalProductsToTenant(tenantId, country);
 
-      // ========== STEP 5: CREATE DEFAULT PAGES (AFTER PRODUCTS) ==========
-      console.log(`📄 Creating default pages for tenant ${tenantId}...`);
-      
-      const pagesSetup = await createDefaultPagesForTenant(tenantId);
-      
-      if (!pagesSetup.success) {
-        console.error(`❌ Pages setup failed:`, pagesSetup.errors);
-        throw new Error(`Failed to create default pages: ${pagesSetup.errors.join(", ")}`);
-      }
-      
-      const pagesCreated = [
-        pagesSetup.homepage && "Homepage",
-        pagesSetup.opportunityPage && "Opportunity",
-        pagesSetup.productPage && "Product"
-      ].filter(Boolean);
-      
-      console.log(`✅ Pages created successfully: ${pagesCreated.join(", ")}`);
-      
-      if (pagesSetup.errors.length > 0) {
-        console.warn(`⚠️ Some pages had warnings:`, pagesSetup.errors);
+        if (!productCopyResult.success) {
+          // Rollback if product copy fails
+          await db.delete("tbl_settings", "tenant_id = ?", [tenantId]);
+          await db.delete("tbl_users", "id = ?", [userId]);
+          await db.delete("tbl_tenants", "id = ?", [tenantId]);
+          
+          return res.status(500).json({
+            error: "PRODUCT_COPY_FAILED",
+            message: productCopyResult.error || "Failed to setup products",
+          });
+        }
+
+        console.log(`✅ Products copied: ${productCopyResult.products_count} products`);
+      } catch (error) {
+        // Rollback on error
+        await db.delete("tbl_settings", "tenant_id = ?", [tenantId]);
+        await db.delete("tbl_users", "id = ?", [userId]);
+        await db.delete("tbl_tenants", "id = ?", [tenantId]);
+        
+        return res.status(500).json({
+          error: "SETUP_FAILED",
+          message: error.message,
+        });
       }
 
-      // ========== STEP 6: CREATE CLOUDFLARE SUBDOMAIN ==========
+      // Create Cloudflare subdomain
       let dnsResult = { success: false };
       try {
         if (process.env.CLOUDFLARE_API_TOKEN) {
-          console.log(`🌐 Creating Cloudflare subdomain...`);
           dnsResult = await addSubdomain(normalizedSubdomain);
-          if (dnsResult.success) {
-            console.log(`✅ Cloudflare subdomain created`);
-          }
         }
       } catch (cfError) {
-        console.error("⚠️ Cloudflare Error (non-critical):", cfError.message);
-        // Don't fail user creation for DNS issues
+        console.error("Cloudflare Error:", cfError.message);
       }
 
-      // ========== STEP 7: SEND WELCOME EMAIL ==========
+      // Send welcome email
       try {
-        console.log(`📧 Sending welcome email...`);
         await sendWelcomeEmail(normalizedEmail, {
           name,
           email: normalizedEmail,
@@ -406,13 +418,10 @@ const CreateUser = [
           subscription_status: "Active",
           subscription_plan,
         });
-        console.log(`✅ Welcome email sent`);
       } catch (emailError) {
-        console.error("⚠️ Email failed (non-critical):", emailError.message);
-        // Don't fail user creation for email issues
+        console.error("Email failed:", emailError.message);
       }
 
-      // ========== SUCCESS RESPONSE ==========
       res.status(201).json({
         success: true,
         user_id: userId,
@@ -427,41 +436,11 @@ const CreateUser = [
           categories: productCopyResult.categories_count,
           products: productCopyResult.products_count,
         },
-        pages_setup: {
-          homepage: !!pagesSetup.homepage,
-          opportunity: !!pagesSetup.opportunityPage,
-          product: !!pagesSetup.productPage,
-        },
-        message: "User created successfully with products and pages!",
+        message: "User created successfully with all products!",
       });
-      
     } catch (error) {
-      console.error("❌ CreateUser Error:", error.stack);
-      
-      // ========== ROLLBACK ON ERROR ==========
-      if (tenantId) {
-        console.log(`🔄 Rolling back tenant ${tenantId}...`);
-        try {
-          // Delete in reverse order of creation
-          await db.delete("tbl_pages", "tenant_id = ?", [tenantId]);
-          await db.delete("tbl_products", "tenant_id = ?", [tenantId]);
-          await db.delete("tbl_product_categories", "tenant_id = ?", [tenantId]);
-          await db.delete("tbl_settings", "tenant_id = ?", [tenantId]);
-          if (userId) {
-            await db.delete("tbl_users", "id = ?", [userId]);
-          }
-          await db.delete("tbl_tenants", "id = ?", [tenantId]);
-          console.log(`✅ Rollback completed`);
-        } catch (rollbackError) {
-          console.error("❌ Rollback failed:", rollbackError.message);
-        }
-      }
-      
-      res.status(500).json({ 
-        error: "SERVER_ERROR", 
-        message: error.message,
-        details: error.stack 
-      });
+      console.error("CreateUser Error:", error.stack);
+      res.status(500).json({ error: "SERVER_ERROR", message: error.message });
     }
   },
 ];
