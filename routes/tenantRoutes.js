@@ -20,6 +20,8 @@ const {
   AddOrUpdateOpportunityPage,
   GetOpportunityPage,
   DeleteOpportunityPage,
+  AddOpportunityPage,
+  UpdateOpportunityPage,
 } = require("../controllers/opportunityPageController");
 const {
   GetJoinUsPage,
@@ -103,9 +105,9 @@ router.put("/:tenantId/product-page", authenticateUser, UpdateProductPage);
 router.delete("/:tenantId/product-page", authenticateUser, DeleteProductPage);
 
 // ==================== OPPORTUNITY PAGE ROUTES ====================
-router.post("/:tenantId/opportunity-page", authenticateUser, AddOrUpdateOpportunityPage);
+router.post("/:tenantId/opportunity-page", authenticateUser, AddOpportunityPage);
 router.get("/:tenantId/opportunity-page", authenticateUser, GetOpportunityPage);
-router.put("/:tenantId/opportunity-page", authenticateUser, AddOrUpdateOpportunityPage);
+router.put("/:tenantId/opportunity-page", authenticateUser, UpdateOpportunityPage);
 router.delete("/:tenantId/opportunity-page", authenticateUser, DeleteOpportunityPage);
 
 // ==================== JOIN US PAGE ROUTES ====================

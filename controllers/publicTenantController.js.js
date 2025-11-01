@@ -243,6 +243,7 @@ async function getTenantSiteData(req, res) {
       joinUsPage: joinUsPage || {},
       opportunityPage: opportunityPage || {},
       socialLinks: socialLinks[0] || {},
+      disclaimers: disclaimers || [],
     });
 
   } catch (error) {

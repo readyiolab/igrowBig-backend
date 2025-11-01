@@ -13,7 +13,8 @@ const userRoutes = require("./routes/userRoutes");
 const templateRoutes = require("./routes/templateRoutes");
 const publicTenantRoutes = require("./routes/publicTenantRoutes");
 const newsletterRoutes = require("./routes/newsletterRoutes");
-
+//Global Product Routes
+const GlobalproductRoutes = require('./routes/productRoutes');
 // Initialize Domain Verification Cron Job
 setupDomainVerificationCron();
 console.log("✅ Domain verification cron job started");
@@ -161,6 +162,7 @@ app.use("/api/tenants", tenantRoutes);
 app.use("/api/templates", templateRoutes);
 app.use("/api/newsletters", newsletterRoutes);
 app.use("/api", publicTenantRoutes);
+app.use('/api', GlobalproductRoutes);
 
 // ========== HEALTH CHECK ==========
 app.get("/health", (req, res) => {

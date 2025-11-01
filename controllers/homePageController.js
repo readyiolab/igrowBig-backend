@@ -23,19 +23,31 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadBaseDir = path.join(__dirname, "../uploads");
     let subFolder;
+    
+    // Map field names to appropriate folders
     switch (file.fieldname) {
-      case "introduction_image":
-        subFolder = "homepage_introduction";
+      case "hero_banner_image":
+        subFolder = "homepage_hero_banners";
         break;
-      case "about_company_image":
+      case "welcome_section_image":
+        subFolder = "homepage_welcome";
+        break;
+      case "about_section_image":
         subFolder = "homepage_about";
         break;
-      case "opportunity_video":
-        subFolder = "homepage_opportunity";
+      case "history_section_image":
+        subFolder = "homepage_history";
+        break;
+      case "video_section_file":
+        subFolder = "homepage_videos";
+        break;
+      case "help_section_image":
+        subFolder = "homepage_help";
         break;
       default:
         subFolder = "homepage_misc";
     }
+    
     const uploadDir = path.join(uploadBaseDir, subFolder);
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
     cb(null, uploadDir);
@@ -52,35 +64,57 @@ const upload = multer({
     const filetypes = /jpeg|jpg|png|mp4/;
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = filetypes.test(file.mimetype);
+    
     if (!extname || !mimetype) {
       return cb(new Error("Only JPEG/JPG/PNG images or MP4 videos allowed"));
     }
+    
+    // Image size validation
     if (["image/jpeg", "image/jpg", "image/png"].includes(file.mimetype) && file.size > 4 * 1024 * 1024) {
       return cb(new Error("Image files must be 4MB or less"));
     }
+    
+    // Video size validation
     if (file.mimetype === "video/mp4" && file.size > 50 * 1024 * 1024) {
       return cb(new Error("MP4 files must be 50MB or less"));
     }
+    
     cb(null, true);
   },
 }).fields([
-  { name: "introduction_image", maxCount: 1 },
-  { name: "about_company_image", maxCount: 1 },
-  { name: "opportunity_video", maxCount: 1 },
+  { name: "hero_banner_image", maxCount: 1 },
+  { name: "welcome_section_image", maxCount: 1 },
+  { name: "about_section_image", maxCount: 1 },
+  { name: "history_section_image", maxCount: 1 },
+  { name: "video_section_file", maxCount: 1 },
+  { name: "help_section_image", maxCount: 1 },
 ]);
 
 // ✅ DEFAULT VALUES for required fields
 const getDefaultValues = () => ({
-  welcome_description: "Welcome to our platform",
-  introduction_content: "Learn more about our opportunity",
-  about_company_title: "About Our Company",
-  about_company_content_1: "We are committed to excellence",
-  about_company_content_2: "",
-  why_network_marketing_title: "Why Network Marketing",
-  why_network_marketing_content: "Discover the benefits of network marketing",
-  opportunity_video_header_title: "Watch Our Opportunity Video",
-  opportunity_video_url: "",
-  support_content: "Contact us for support",
+  // Hero Section (Slider Banner)
+  hero_section_title: "Welcome to NHT Global",
+  hero_section_content: "Transform your life with our opportunity",
+  
+  // Welcome Section
+  welcome_section_title: "Welcome",
+  welcome_section_content: "Welcome to our platform where dreams become reality",
+  
+  // About NHT Global Section
+  about_section_title: "About NHT Global",
+  about_section_content: "Learn about our company and mission",
+  
+  // History of NHT Global Section
+  history_section_title: "History of NHT Global",
+  history_section_content: "Discover our journey and legacy",
+  
+  // Video Section
+  video_section_title: "Watch NHT Global Video",
+  video_section_youtube_url: "",
+  
+  // How Get Dream Life Can Help Section
+  help_section_title: "How Get Dream Life Can Help",
+  help_section_content: "Discover how we can help you achieve your dreams",
 });
 
 // Add Home Page
@@ -92,16 +126,29 @@ const AddHomePage = async (req, res) => {
 
     const { tenantId } = req.params;
     const {
-      welcome_description,
-      introduction_content,
-      about_company_title,
-      about_company_content_1,
-      about_company_content_2,
-      why_network_marketing_title,
-      why_network_marketing_content,
-      opportunity_video_header_title,
-      youtube_link,
-      support_content,
+      // Hero Section
+      hero_section_title,
+      hero_section_content,
+      
+      // Welcome Section
+      welcome_section_title,
+      welcome_section_content,
+      
+      // About Section
+      about_section_title,
+      about_section_content,
+      
+      // History Section
+      history_section_title,
+      history_section_content,
+      
+      // Video Section
+      video_section_title,
+      video_section_youtube_url,
+      
+      // Help Section
+      help_section_title,
+      help_section_content,
     } = req.body;
 
     if (!checkTenantAuth(req, tenantId)) {
@@ -119,38 +166,72 @@ const AddHomePage = async (req, res) => {
 
       const homePageData = {
         tenant_id: tenantId,
-        welcome_description,
-        introduction_content,
-        about_company_title,
-        about_company_content_1,
-        about_company_content_2: about_company_content_2 || null,
-        why_network_marketing_title,
-        why_network_marketing_content,
-        opportunity_video_header_title,
-        opportunity_video_url: youtube_link || null,
-        support_content,
+        
+        // Hero Section
+        hero_section_title,
+        hero_section_content,
+        
+        // Welcome Section
+        welcome_section_title,
+        welcome_section_content,
+        
+        // About Section
+        about_section_title,
+        about_section_content,
+        
+        // History Section
+        history_section_title,
+        history_section_content,
+        
+        // Video Section
+        video_section_title,
+        video_section_youtube_url: video_section_youtube_url || null,
+        
+        // Help Section
+        help_section_title,
+        help_section_content,
       };
 
+      // Handle file uploads
       if (req.files) {
-        if (req.files.introduction_image) {
-          const file = req.files.introduction_image[0];
-          homePageData.introduction_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_introduction`);
+        if (req.files.hero_banner_image) {
+          const file = req.files.hero_banner_image[0];
+          homePageData.hero_banner_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_hero_banners`);
           safeUnlink(file.path);
         }
-        if (req.files.about_company_image) {
-          const file = req.files.about_company_image[0];
-          homePageData.about_company_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
+        if (req.files.welcome_section_image) {
+          const file = req.files.welcome_section_image[0];
+          homePageData.welcome_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_welcome`);
           safeUnlink(file.path);
         }
-        if (req.files.opportunity_video) {
-          const file = req.files.opportunity_video[0];
-          homePageData.opportunity_video_url = await uploadToS3(file, `tenant_${tenantId}/homepage_opportunity`);
+        if (req.files.about_section_image) {
+          const file = req.files.about_section_image[0];
+          homePageData.about_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
+          safeUnlink(file.path);
+        }
+        if (req.files.history_section_image) {
+          const file = req.files.history_section_image[0];
+          homePageData.history_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_history`);
+          safeUnlink(file.path);
+        }
+        if (req.files.video_section_file) {
+          const file = req.files.video_section_file[0];
+          homePageData.video_section_file_url = await uploadToS3(file, `tenant_${tenantId}/homepage_videos`);
+          safeUnlink(file.path);
+        }
+        if (req.files.help_section_image) {
+          const file = req.files.help_section_image[0];
+          homePageData.help_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_help`);
           safeUnlink(file.path);
         }
       }
 
       const result = await db.insert("tbl_home_pages", homePageData);
-      res.status(201).json({ message: "Home page added", page_id: result.insert_id });
+      res.status(201).json({ 
+        message: "Home page added successfully", 
+        page_id: result.insert_id,
+        data: homePageData 
+      });
     } catch (err) {
       console.error("Error in AddHomePage:", err);
       res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
@@ -167,16 +248,29 @@ const UpdateHomePage = async (req, res) => {
 
     const { tenantId } = req.params;
     const {
-      welcome_description,
-      introduction_content,
-      about_company_title,
-      about_company_content_1,
-      about_company_content_2,
-      why_network_marketing_title,
-      why_network_marketing_content,
-      opportunity_video_header_title,
-      youtube_link,
-      support_content,
+      // Hero Section
+      hero_section_title,
+      hero_section_content,
+      
+      // Welcome Section
+      welcome_section_title,
+      welcome_section_content,
+      
+      // About Section
+      about_section_title,
+      about_section_content,
+      
+      // History Section
+      history_section_title,
+      history_section_content,
+      
+      // Video Section
+      video_section_title,
+      video_section_youtube_url,
+      
+      // Help Section
+      help_section_title,
+      help_section_content,
     } = req.body;
 
     if (!checkTenantAuth(req, tenantId)) {
@@ -191,34 +285,62 @@ const UpdateHomePage = async (req, res) => {
         const defaults = getDefaultValues();
         const homePageData = {
           tenant_id: tenantId,
-          // Use provided values OR defaults (never empty/null for required fields)
-          welcome_description: welcome_description || defaults.welcome_description,
-          introduction_content: introduction_content || defaults.introduction_content,
-          about_company_title: about_company_title || defaults.about_company_title,
-          about_company_content_1: about_company_content_1 || defaults.about_company_content_1,
-          about_company_content_2: about_company_content_2 || null,
-          why_network_marketing_title: why_network_marketing_title || defaults.why_network_marketing_title,
-          why_network_marketing_content: why_network_marketing_content || defaults.why_network_marketing_content,
-          opportunity_video_header_title: opportunity_video_header_title || defaults.opportunity_video_header_title,
-          opportunity_video_url: youtube_link || null,
-          support_content: support_content || defaults.support_content,
+          
+          // Hero Section
+          hero_section_title: hero_section_title || defaults.hero_section_title,
+          hero_section_content: hero_section_content || defaults.hero_section_content,
+          
+          // Welcome Section
+          welcome_section_title: welcome_section_title || defaults.welcome_section_title,
+          welcome_section_content: welcome_section_content || defaults.welcome_section_content,
+          
+          // About Section
+          about_section_title: about_section_title || defaults.about_section_title,
+          about_section_content: about_section_content || defaults.about_section_content,
+          
+          // History Section
+          history_section_title: history_section_title || defaults.history_section_title,
+          history_section_content: history_section_content || defaults.history_section_content,
+          
+          // Video Section
+          video_section_title: video_section_title || defaults.video_section_title,
+          video_section_youtube_url: video_section_youtube_url || null,
+          
+          // Help Section
+          help_section_title: help_section_title || defaults.help_section_title,
+          help_section_content: help_section_content || defaults.help_section_content,
         };
 
         // Handle file uploads for new record
         if (req.files) {
-          if (req.files.introduction_image) {
-            const file = req.files.introduction_image[0];
-            homePageData.introduction_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_introduction`);
+          if (req.files.hero_banner_image) {
+            const file = req.files.hero_banner_image[0];
+            homePageData.hero_banner_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_hero_banners`);
             safeUnlink(file.path);
           }
-          if (req.files.about_company_image) {
-            const file = req.files.about_company_image[0];
-            homePageData.about_company_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
+          if (req.files.welcome_section_image) {
+            const file = req.files.welcome_section_image[0];
+            homePageData.welcome_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_welcome`);
             safeUnlink(file.path);
           }
-          if (req.files.opportunity_video) {
-            const file = req.files.opportunity_video[0];
-            homePageData.opportunity_video_url = await uploadToS3(file, `tenant_${tenantId}/homepage_opportunity`);
+          if (req.files.about_section_image) {
+            const file = req.files.about_section_image[0];
+            homePageData.about_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
+            safeUnlink(file.path);
+          }
+          if (req.files.history_section_image) {
+            const file = req.files.history_section_image[0];
+            homePageData.history_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_history`);
+            safeUnlink(file.path);
+          }
+          if (req.files.video_section_file) {
+            const file = req.files.video_section_file[0];
+            homePageData.video_section_file_url = await uploadToS3(file, `tenant_${tenantId}/homepage_videos`);
+            safeUnlink(file.path);
+          }
+          if (req.files.help_section_image) {
+            const file = req.files.help_section_image[0];
+            homePageData.help_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_help`);
             safeUnlink(file.path);
           }
         }
@@ -234,42 +356,79 @@ const UpdateHomePage = async (req, res) => {
       // ✅ PAGE EXISTS - SMART UPDATE (only update fields that are provided)
       const homePageData = {};
 
-      // Only update fields that are actually provided in the request
-      if (welcome_description !== undefined) homePageData.welcome_description = welcome_description;
-      if (introduction_content !== undefined) homePageData.introduction_content = introduction_content;
-      if (about_company_title !== undefined) homePageData.about_company_title = about_company_title;
-      if (about_company_content_1 !== undefined) homePageData.about_company_content_1 = about_company_content_1;
-      if (about_company_content_2 !== undefined) homePageData.about_company_content_2 = about_company_content_2 || null;
-      if (why_network_marketing_title !== undefined) homePageData.why_network_marketing_title = why_network_marketing_title;
-      if (why_network_marketing_content !== undefined) homePageData.why_network_marketing_content = why_network_marketing_content;
-      if (opportunity_video_header_title !== undefined) homePageData.opportunity_video_header_title = opportunity_video_header_title;
-      if (youtube_link !== undefined) homePageData.opportunity_video_url = youtube_link || null;
-      if (support_content !== undefined) homePageData.support_content = support_content;
+      // Hero Section
+      if (hero_section_title !== undefined) homePageData.hero_section_title = hero_section_title;
+      if (hero_section_content !== undefined) homePageData.hero_section_content = hero_section_content;
+      
+      // Welcome Section
+      if (welcome_section_title !== undefined) homePageData.welcome_section_title = welcome_section_title;
+      if (welcome_section_content !== undefined) homePageData.welcome_section_content = welcome_section_content;
+      
+      // About Section
+      if (about_section_title !== undefined) homePageData.about_section_title = about_section_title;
+      if (about_section_content !== undefined) homePageData.about_section_content = about_section_content;
+      
+      // History Section
+      if (history_section_title !== undefined) homePageData.history_section_title = history_section_title;
+      if (history_section_content !== undefined) homePageData.history_section_content = history_section_content;
+      
+      // Video Section
+      if (video_section_title !== undefined) homePageData.video_section_title = video_section_title;
+      if (video_section_youtube_url !== undefined) homePageData.video_section_youtube_url = video_section_youtube_url || null;
+      
+      // Help Section
+      if (help_section_title !== undefined) homePageData.help_section_title = help_section_title;
+      if (help_section_content !== undefined) homePageData.help_section_content = help_section_content;
 
       // Handle file uploads
       if (req.files) {
-        if (req.files.introduction_image) {
-          const file = req.files.introduction_image[0];
-          if (existingPage.introduction_image_url) {
-            await deleteFromS3(existingPage.introduction_image_url);
+        if (req.files.hero_banner_image) {
+          const file = req.files.hero_banner_image[0];
+          if (existingPage.hero_banner_image_url) {
+            await deleteFromS3(existingPage.hero_banner_image_url);
           }
-          homePageData.introduction_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_introduction`);
+          homePageData.hero_banner_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_hero_banners`);
           safeUnlink(file.path);
         }
-        if (req.files.about_company_image) {
-          const file = req.files.about_company_image[0];
-          if (existingPage.about_company_image_url) {
-            await deleteFromS3(existingPage.about_company_image_url);
+        if (req.files.welcome_section_image) {
+          const file = req.files.welcome_section_image[0];
+          if (existingPage.welcome_section_image_url) {
+            await deleteFromS3(existingPage.welcome_section_image_url);
           }
-          homePageData.about_company_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
+          homePageData.welcome_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_welcome`);
           safeUnlink(file.path);
         }
-        if (req.files.opportunity_video) {
-          const file = req.files.opportunity_video[0];
-          if (existingPage.opportunity_video_url && !youtube_link && !existingPage.opportunity_video_url.includes("youtube")) {
-            await deleteFromS3(existingPage.opportunity_video_url);
+        if (req.files.about_section_image) {
+          const file = req.files.about_section_image[0];
+          if (existingPage.about_section_image_url) {
+            await deleteFromS3(existingPage.about_section_image_url);
           }
-          homePageData.opportunity_video_url = await uploadToS3(file, `tenant_${tenantId}/homepage_opportunity`);
+          homePageData.about_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
+          safeUnlink(file.path);
+        }
+        if (req.files.history_section_image) {
+          const file = req.files.history_section_image[0];
+          if (existingPage.history_section_image_url) {
+            await deleteFromS3(existingPage.history_section_image_url);
+          }
+          homePageData.history_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_history`);
+          safeUnlink(file.path);
+        }
+        if (req.files.video_section_file) {
+          const file = req.files.video_section_file[0];
+          // Delete old video if it exists and is not a YouTube link
+          if (existingPage.video_section_file_url && !video_section_youtube_url) {
+            await deleteFromS3(existingPage.video_section_file_url);
+          }
+          homePageData.video_section_file_url = await uploadToS3(file, `tenant_${tenantId}/homepage_videos`);
+          safeUnlink(file.path);
+        }
+        if (req.files.help_section_image) {
+          const file = req.files.help_section_image[0];
+          if (existingPage.help_section_image_url) {
+            await deleteFromS3(existingPage.help_section_image_url);
+          }
+          homePageData.help_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_help`);
           safeUnlink(file.path);
         }
       }
@@ -279,7 +438,10 @@ const UpdateHomePage = async (req, res) => {
         await db.update("tbl_home_pages", homePageData, `tenant_id = ${tenantId}`);
       }
 
-      res.json({ message: "Home page updated successfully", data: homePageData });
+      res.json({ 
+        message: "Home page updated successfully", 
+        data: homePageData 
+      });
     } catch (err) {
       console.error("Error in UpdateHomePage:", err);
       res.status(500).json({ error: "SERVER_ERROR", message: "Server error" });
@@ -290,15 +452,18 @@ const UpdateHomePage = async (req, res) => {
 // Get Home Page
 const GetHomePage = async (req, res) => {
   const { tenantId } = req.params;
+  
   if (!checkTenantAuth(req, tenantId)) {
     return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
   }
 
   try {
     const page = await db.select("tbl_home_pages", "*", `tenant_id = ${tenantId}`);
+    
     if (!page) {
       return res.status(200).json({});
     }
+    
     res.json(page);
   } catch (err) {
     console.error("Error in GetHomePage:", err);

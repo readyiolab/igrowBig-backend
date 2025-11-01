@@ -19,6 +19,7 @@ const {
   startVerificationProcess,
 } = require("../services/domainVerificationService");
 const { copyGlobalProductsToTenant } = require("../utils/productCopy");
+const {createDefaultPagesForTenant} = require("../services/pageSetupService");
 const { sendDomainNotification } = require("../config/email");
 
 // Currency mappings (same as tenant controller)
@@ -337,6 +338,32 @@ const CreateUser = [
         updated_at: timestamp,
       };
       await db.insert("tbl_settings", settingsData);
+
+
+        // ========== CREATE DEFAULT PAGES FOR ALL SECTIONS ==========
+
+      console.log(`🛠️  Setting up default pages for tenant ${tenantId}...`);
+
+      let pagesSetup = { success: false };
+      try {
+        console.log(`📄 Creating default pages for tenant ${tenantId}...`);
+        pagesSetup = await createDefaultPagesForTenant(tenantId);
+        
+        if (pagesSetup.errors.length > 0) {
+          console.warn(`⚠️ Some pages failed to create:`, pagesSetup.errors);
+        }
+        
+        const pagesCreated = [
+          pagesSetup.homepage && "Homepage",
+          pagesSetup.opportunityPage && "Opportunity",
+          pagesSetup.productPage && "Product"
+        ].filter(Boolean);
+        
+        console.log(`✅ Pages created: ${pagesCreated.join(", ")}`);
+      } catch (error) {
+        console.error("❌ Page setup error:", error.message);
+        // Don't fail user creation if pages fail, just log it
+      }
 
       // Copy products
       let productCopyResult = { success: false };
