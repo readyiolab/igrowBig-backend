@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const { checkTenantAuth } = require("../middleware/authMiddleware");
 const { uploadToS3, deleteFromS3 } = require("../services/awsS3");
+const { getDefaultHomePageData } = require("../utils/defaultPagesData"); // ✅ IMPORT DEFAULT DATA
 require("dotenv").config();
 
 // ✅ Safe file deletion helper
@@ -90,34 +91,40 @@ const upload = multer({
   { name: "help_section_image", maxCount: 1 },
 ]);
 
-// ✅ DEFAULT VALUES for required fields
-const getDefaultValues = () => ({
-  // Hero Section (Slider Banner)
-  hero_section_title: "Welcome to NHT Global",
-  hero_section_content: "Transform your life with our opportunity",
+// ✅ Helper function to handle file uploads
+const handleFileUploads = async (req, tenantId, existingPage = null) => {
+  const uploadedFiles = {};
   
-  // Welcome Section
-  welcome_section_title: "Welcome",
-  welcome_section_content: "Welcome to our platform where dreams become reality",
-  
-  // About NHT Global Section
-  about_section_title: "About NHT Global",
-  about_section_content: "Learn about our company and mission",
-  
-  // History of NHT Global Section
-  history_section_title: "History of NHT Global",
-  history_section_content: "Discover our journey and legacy",
-  
-  // Video Section
-  video_section_title: "Watch NHT Global Video",
-  video_section_youtube_url: "",
-  
-  // How Get Dream Life Can Help Section
-  help_section_title: "How Get Dream Life Can Help",
-  help_section_content: "Discover how we can help you achieve your dreams",
-});
+  if (!req.files) return uploadedFiles;
 
-// Add Home Page
+  const fileFields = [
+    { field: "hero_banner_image", folder: "homepage_hero_banners", existingUrl: "hero_banner_image_url" },
+    { field: "welcome_section_image", folder: "homepage_welcome", existingUrl: "welcome_section_image_url" },
+    { field: "about_section_image", folder: "homepage_about", existingUrl: "about_section_image_url" },
+    { field: "history_section_image", folder: "homepage_history", existingUrl: "history_section_image_url" },
+    { field: "video_section_file", folder: "homepage_videos", existingUrl: "video_section_file_url" },
+    { field: "help_section_image", folder: "homepage_help", existingUrl: "help_section_image_url" },
+  ];
+
+  for (const { field, folder, existingUrl } of fileFields) {
+    if (req.files[field]) {
+      const file = req.files[field][0];
+      
+      // Delete old file if updating
+      if (existingPage && existingPage[existingUrl]) {
+        await deleteFromS3(existingPage[existingUrl]);
+      }
+      
+      // Upload new file
+      uploadedFiles[existingUrl] = await uploadToS3(file, `tenant_${tenantId}/${folder}`);
+      safeUnlink(file.path);
+    }
+  }
+
+  return uploadedFiles;
+};
+
+// ✅ Add Home Page (Creates only if doesn't exist)
 const AddHomePage = async (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -125,31 +132,6 @@ const AddHomePage = async (req, res) => {
     }
 
     const { tenantId } = req.params;
-    const {
-      // Hero Section
-      hero_section_title,
-      hero_section_content,
-      
-      // Welcome Section
-      welcome_section_title,
-      welcome_section_content,
-      
-      // About Section
-      about_section_title,
-      about_section_content,
-      
-      // History Section
-      history_section_title,
-      history_section_content,
-      
-      // Video Section
-      video_section_title,
-      video_section_youtube_url,
-      
-      // Help Section
-      help_section_title,
-      help_section_content,
-    } = req.body;
 
     if (!checkTenantAuth(req, tenantId)) {
       return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
@@ -164,67 +146,46 @@ const AddHomePage = async (req, res) => {
         });
       }
 
+      // ✅ Get default values and merge with request body
+      const defaults = getDefaultHomePageData();
+      
       const homePageData = {
         tenant_id: tenantId,
         
         // Hero Section
-        hero_section_title,
-        hero_section_content,
+        hero_section_title: req.body.hero_section_title || defaults.hero_section_title,
+        hero_section_content: req.body.hero_section_content || defaults.hero_section_content,
+        hero_banner_image_url: defaults.hero_banner_image_url,
         
         // Welcome Section
-        welcome_section_title,
-        welcome_section_content,
+        welcome_section_title: req.body.welcome_section_title || defaults.welcome_section_title,
+        welcome_section_content: req.body.welcome_section_content || defaults.welcome_section_content,
+        welcome_section_image_url: defaults.welcome_section_image_url,
         
         // About Section
-        about_section_title,
-        about_section_content,
+        about_section_title: req.body.about_section_title || defaults.about_section_title,
+        about_section_content: req.body.about_section_content || defaults.about_section_content,
+        about_section_image_url: defaults.about_section_image_url,
         
         // History Section
-        history_section_title,
-        history_section_content,
+        history_section_title: req.body.history_section_title || defaults.history_section_title,
+        history_section_content: req.body.history_section_content || defaults.history_section_content,
+        history_section_image_url: defaults.history_section_image_url,
         
         // Video Section
-        video_section_title,
-        video_section_youtube_url: video_section_youtube_url || null,
+        video_section_title: req.body.video_section_title || defaults.video_section_title,
+        video_section_youtube_url: req.body.video_section_youtube_url || defaults.video_section_youtube_url,
+        video_section_file_url: defaults.video_section_file_url,
         
         // Help Section
-        help_section_title,
-        help_section_content,
+        help_section_title: req.body.help_section_title || defaults.help_section_title,
+        help_section_content: req.body.help_section_content || defaults.help_section_content,
+        help_section_image_url: defaults.help_section_image_url,
       };
 
-      // Handle file uploads
-      if (req.files) {
-        if (req.files.hero_banner_image) {
-          const file = req.files.hero_banner_image[0];
-          homePageData.hero_banner_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_hero_banners`);
-          safeUnlink(file.path);
-        }
-        if (req.files.welcome_section_image) {
-          const file = req.files.welcome_section_image[0];
-          homePageData.welcome_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_welcome`);
-          safeUnlink(file.path);
-        }
-        if (req.files.about_section_image) {
-          const file = req.files.about_section_image[0];
-          homePageData.about_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
-          safeUnlink(file.path);
-        }
-        if (req.files.history_section_image) {
-          const file = req.files.history_section_image[0];
-          homePageData.history_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_history`);
-          safeUnlink(file.path);
-        }
-        if (req.files.video_section_file) {
-          const file = req.files.video_section_file[0];
-          homePageData.video_section_file_url = await uploadToS3(file, `tenant_${tenantId}/homepage_videos`);
-          safeUnlink(file.path);
-        }
-        if (req.files.help_section_image) {
-          const file = req.files.help_section_image[0];
-          homePageData.help_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_help`);
-          safeUnlink(file.path);
-        }
-      }
+      // ✅ Handle file uploads (will override default image URLs)
+      const uploadedFiles = await handleFileUploads(req, tenantId);
+      Object.assign(homePageData, uploadedFiles);
 
       const result = await db.insert("tbl_home_pages", homePageData);
       res.status(201).json({ 
@@ -239,7 +200,7 @@ const AddHomePage = async (req, res) => {
   });
 };
 
-// ✅ UPDATED: Update Home Page (Smart Partial Updates)
+// ✅ OPTIMIZED: Update Home Page (Smart Partial Updates with Auto-Creation)
 const UpdateHomePage = async (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -247,31 +208,6 @@ const UpdateHomePage = async (req, res) => {
     }
 
     const { tenantId } = req.params;
-    const {
-      // Hero Section
-      hero_section_title,
-      hero_section_content,
-      
-      // Welcome Section
-      welcome_section_title,
-      welcome_section_content,
-      
-      // About Section
-      about_section_title,
-      about_section_content,
-      
-      // History Section
-      history_section_title,
-      history_section_content,
-      
-      // Video Section
-      video_section_title,
-      video_section_youtube_url,
-      
-      // Help Section
-      help_section_title,
-      help_section_content,
-    } = req.body;
 
     if (!checkTenantAuth(req, tenantId)) {
       return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
@@ -282,68 +218,40 @@ const UpdateHomePage = async (req, res) => {
       
       // ✅ IF NO PAGE EXISTS, CREATE ONE WITH DEFAULTS
       if (!existingPage) {
-        const defaults = getDefaultValues();
+        const defaults = getDefaultHomePageData();
+        
         const homePageData = {
           tenant_id: tenantId,
           
-          // Hero Section
-          hero_section_title: hero_section_title || defaults.hero_section_title,
-          hero_section_content: hero_section_content || defaults.hero_section_content,
+          // Merge defaults with provided values
+          hero_section_title: req.body.hero_section_title || defaults.hero_section_title,
+          hero_section_content: req.body.hero_section_content || defaults.hero_section_content,
+          hero_banner_image_url: defaults.hero_banner_image_url,
           
-          // Welcome Section
-          welcome_section_title: welcome_section_title || defaults.welcome_section_title,
-          welcome_section_content: welcome_section_content || defaults.welcome_section_content,
+          welcome_section_title: req.body.welcome_section_title || defaults.welcome_section_title,
+          welcome_section_content: req.body.welcome_section_content || defaults.welcome_section_content,
+          welcome_section_image_url: defaults.welcome_section_image_url,
           
-          // About Section
-          about_section_title: about_section_title || defaults.about_section_title,
-          about_section_content: about_section_content || defaults.about_section_content,
+          about_section_title: req.body.about_section_title || defaults.about_section_title,
+          about_section_content: req.body.about_section_content || defaults.about_section_content,
+          about_section_image_url: defaults.about_section_image_url,
           
-          // History Section
-          history_section_title: history_section_title || defaults.history_section_title,
-          history_section_content: history_section_content || defaults.history_section_content,
+          history_section_title: req.body.history_section_title || defaults.history_section_title,
+          history_section_content: req.body.history_section_content || defaults.history_section_content,
+          history_section_image_url: defaults.history_section_image_url,
           
-          // Video Section
-          video_section_title: video_section_title || defaults.video_section_title,
-          video_section_youtube_url: video_section_youtube_url || null,
+          video_section_title: req.body.video_section_title || defaults.video_section_title,
+          video_section_youtube_url: req.body.video_section_youtube_url || defaults.video_section_youtube_url,
+          video_section_file_url: defaults.video_section_file_url,
           
-          // Help Section
-          help_section_title: help_section_title || defaults.help_section_title,
-          help_section_content: help_section_content || defaults.help_section_content,
+          help_section_title: req.body.help_section_title || defaults.help_section_title,
+          help_section_content: req.body.help_section_content || defaults.help_section_content,
+          help_section_image_url: defaults.help_section_image_url,
         };
 
         // Handle file uploads for new record
-        if (req.files) {
-          if (req.files.hero_banner_image) {
-            const file = req.files.hero_banner_image[0];
-            homePageData.hero_banner_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_hero_banners`);
-            safeUnlink(file.path);
-          }
-          if (req.files.welcome_section_image) {
-            const file = req.files.welcome_section_image[0];
-            homePageData.welcome_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_welcome`);
-            safeUnlink(file.path);
-          }
-          if (req.files.about_section_image) {
-            const file = req.files.about_section_image[0];
-            homePageData.about_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
-            safeUnlink(file.path);
-          }
-          if (req.files.history_section_image) {
-            const file = req.files.history_section_image[0];
-            homePageData.history_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_history`);
-            safeUnlink(file.path);
-          }
-          if (req.files.video_section_file) {
-            const file = req.files.video_section_file[0];
-            homePageData.video_section_file_url = await uploadToS3(file, `tenant_${tenantId}/homepage_videos`);
-            safeUnlink(file.path);
-          }
-          if (req.files.help_section_image) {
-            const file = req.files.help_section_image[0];
-            homePageData.help_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_help`);
-            safeUnlink(file.path);
-          }
-        }
+        const uploadedFiles = await handleFileUploads(req, tenantId);
+        Object.assign(homePageData, uploadedFiles);
 
         const result = await db.insert("tbl_home_pages", homePageData);
         return res.status(201).json({ 
@@ -356,82 +264,25 @@ const UpdateHomePage = async (req, res) => {
       // ✅ PAGE EXISTS - SMART UPDATE (only update fields that are provided)
       const homePageData = {};
 
-      // Hero Section
-      if (hero_section_title !== undefined) homePageData.hero_section_title = hero_section_title;
-      if (hero_section_content !== undefined) homePageData.hero_section_content = hero_section_content;
-      
-      // Welcome Section
-      if (welcome_section_title !== undefined) homePageData.welcome_section_title = welcome_section_title;
-      if (welcome_section_content !== undefined) homePageData.welcome_section_content = welcome_section_content;
-      
-      // About Section
-      if (about_section_title !== undefined) homePageData.about_section_title = about_section_title;
-      if (about_section_content !== undefined) homePageData.about_section_content = about_section_content;
-      
-      // History Section
-      if (history_section_title !== undefined) homePageData.history_section_title = history_section_title;
-      if (history_section_content !== undefined) homePageData.history_section_content = history_section_content;
-      
-      // Video Section
-      if (video_section_title !== undefined) homePageData.video_section_title = video_section_title;
-      if (video_section_youtube_url !== undefined) homePageData.video_section_youtube_url = video_section_youtube_url || null;
-      
-      // Help Section
-      if (help_section_title !== undefined) homePageData.help_section_title = help_section_title;
-      if (help_section_content !== undefined) homePageData.help_section_content = help_section_content;
+      // Only update fields that are explicitly provided
+      const textFields = [
+        "hero_section_title", "hero_section_content",
+        "welcome_section_title", "welcome_section_content",
+        "about_section_title", "about_section_content",
+        "history_section_title", "history_section_content",
+        "video_section_title", "video_section_youtube_url",
+        "help_section_title", "help_section_content"
+      ];
 
-      // Handle file uploads
-      if (req.files) {
-        if (req.files.hero_banner_image) {
-          const file = req.files.hero_banner_image[0];
-          if (existingPage.hero_banner_image_url) {
-            await deleteFromS3(existingPage.hero_banner_image_url);
-          }
-          homePageData.hero_banner_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_hero_banners`);
-          safeUnlink(file.path);
+      textFields.forEach(field => {
+        if (req.body[field] !== undefined) {
+          homePageData[field] = req.body[field] || null;
         }
-        if (req.files.welcome_section_image) {
-          const file = req.files.welcome_section_image[0];
-          if (existingPage.welcome_section_image_url) {
-            await deleteFromS3(existingPage.welcome_section_image_url);
-          }
-          homePageData.welcome_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_welcome`);
-          safeUnlink(file.path);
-        }
-        if (req.files.about_section_image) {
-          const file = req.files.about_section_image[0];
-          if (existingPage.about_section_image_url) {
-            await deleteFromS3(existingPage.about_section_image_url);
-          }
-          homePageData.about_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_about`);
-          safeUnlink(file.path);
-        }
-        if (req.files.history_section_image) {
-          const file = req.files.history_section_image[0];
-          if (existingPage.history_section_image_url) {
-            await deleteFromS3(existingPage.history_section_image_url);
-          }
-          homePageData.history_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_history`);
-          safeUnlink(file.path);
-        }
-        if (req.files.video_section_file) {
-          const file = req.files.video_section_file[0];
-          // Delete old video if it exists and is not a YouTube link
-          if (existingPage.video_section_file_url && !video_section_youtube_url) {
-            await deleteFromS3(existingPage.video_section_file_url);
-          }
-          homePageData.video_section_file_url = await uploadToS3(file, `tenant_${tenantId}/homepage_videos`);
-          safeUnlink(file.path);
-        }
-        if (req.files.help_section_image) {
-          const file = req.files.help_section_image[0];
-          if (existingPage.help_section_image_url) {
-            await deleteFromS3(existingPage.help_section_image_url);
-          }
-          homePageData.help_section_image_url = await uploadToS3(file, `tenant_${tenantId}/homepage_help`);
-          safeUnlink(file.path);
-        }
-      }
+      });
+
+      // Handle file uploads (with old file deletion)
+      const uploadedFiles = await handleFileUploads(req, tenantId, existingPage);
+      Object.assign(homePageData, uploadedFiles);
 
       // Only update if there's something to update
       if (Object.keys(homePageData).length > 0) {
@@ -449,7 +300,7 @@ const UpdateHomePage = async (req, res) => {
   });
 };
 
-// Get Home Page
+// ✅ Get Home Page (Returns empty object if not found)
 const GetHomePage = async (req, res) => {
   const { tenantId } = req.params;
   

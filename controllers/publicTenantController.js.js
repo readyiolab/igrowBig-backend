@@ -194,7 +194,7 @@ async function getTenantSiteData(req, res) {
       categories,
       blogs,
       homePage,
-      aboutProductPage,
+   
       productPage,
       joinUsPage,
       opportunityPage,
@@ -208,7 +208,7 @@ async function getTenantSiteData(req, res) {
       db.selectAll("tbl_categories", "*", "tenant_id = ? AND status = 'active'", [tenantId]),
       db.selectAll("tbl_blogs", "*", "tenant_id = ? AND is_visible = 1", [tenantId]),
       db.select("tbl_home_pages", "*", `tenant_id = ${tenantId}`),
-      db.select("tbl_about_product_pages", "*", `tenant_id = ${tenantId}`),
+      
       db.select("tbl_product_page", "*", `tenant_id = ${tenantId}`),
       db.select("tbl_joinus_page", "*", `tenant_id = ${tenantId}`),
       db.select("tbl_opportunity_page", "*", `tenant_id = ${tenantId}`),
@@ -239,7 +239,7 @@ async function getTenantSiteData(req, res) {
       categories,
       blogs,
       homePage: homePage || {},
-      aboutProductPage: aboutProductPage || {},
+     
       productPage: productPage || {},
       joinUsPage: joinUsPage || {},
       opportunityPage: opportunityPage || {},

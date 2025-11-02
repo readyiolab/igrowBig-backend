@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const { checkTenantAuth } = require("../middleware/authMiddleware");
 const { uploadToS3, deleteFromS3 } = require("../services/awsS3");
+const { getDefaultProductPageData } = require("../utils/defaultPageData"); // ✅ IMPORT from single source
 
 // ✅ Safe file deletion helper
 const safeUnlink = (filePath) => {
@@ -23,7 +24,6 @@ const storage = multer.diskStorage({
     const uploadBaseDir = path.join(__dirname, "../uploads");
     let subFolder;
     
-    // Map field names to appropriate folders
     switch (file.fieldname) {
       case "banner_section_image":
         subFolder = "product_page_banners";
@@ -59,12 +59,10 @@ const upload = multer({
       return cb(new Error("Only JPEG/JPG/PNG images or MP4 videos allowed"));
     }
     
-    // Image size validation
     if (["image/jpeg", "image/jpg", "image/png"].includes(file.mimetype) && file.size > 4 * 1024 * 1024) {
       return cb(new Error("Image files must be 4MB or less"));
     }
     
-    // Video size validation
     if (file.mimetype === "video/mp4" && file.size > 50 * 1024 * 1024) {
       return cb(new Error("MP4 files must be 50MB or less"));
     }
@@ -77,22 +75,6 @@ const upload = multer({
   { name: "video_section_file", maxCount: 1 },
 ]);
 
-// ✅ DEFAULT VALUES for required fields
-const getDefaultValues = () => ({
-  // Banner Section
-  banner_section_title: "Welcome to Our Products", // 🆕 Added
-  banner_section_content: "Discover amazing products that transform your life",
-  
-  // About Product Section
-  about_section_title: "About Our Products",
-  about_section_content: "Discover our amazing products and their benefits",
-  
-  // Video Section
-  video_section_title: "Watch NHT Global Product Video",
-  video_section_content: "Learn more about our products through this video",
-  video_section_youtube_url: "",
-});
-
 // Add Product Page
 const AddProductPage = async (req, res) => {
   upload(req, res, async (err) => {
@@ -102,15 +84,10 @@ const AddProductPage = async (req, res) => {
 
     const { tenantId } = req.params;
     const {
-      // Banner Section
-      banner_section_title, // 🆕 Added
+      banner_section_title,
       banner_section_content,
-      
-      // About Product Section
       about_section_title,
       about_section_content,
-      
-      // Video Section
       video_section_title,
       video_section_content,
       video_section_youtube_url,
@@ -131,16 +108,10 @@ const AddProductPage = async (req, res) => {
 
       const productPageData = {
         tenant_id: tenantId,
-        
-        // Banner Section
-        banner_section_title, // 🆕 Added
+        banner_section_title,
         banner_section_content,
-        
-        // About Product Section
         about_section_title,
         about_section_content,
-        
-        // Video Section
         video_section_title,
         video_section_content,
         video_section_youtube_url: video_section_youtube_url || null,
@@ -178,7 +149,7 @@ const AddProductPage = async (req, res) => {
   });
 };
 
-// ✅ UPDATED: Update Product Page (Smart Partial Updates)
+// ✅ OPTIMIZED: Update Product Page (Using shared defaults)
 const UpdateProductPage = async (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -187,15 +158,10 @@ const UpdateProductPage = async (req, res) => {
 
     const { tenantId } = req.params;
     const {
-      // Banner Section
-      banner_section_title, // 🆕 Added
+      banner_section_title,
       banner_section_content,
-      
-      // About Product Section
       about_section_title,
       about_section_content,
-      
-      // Video Section
       video_section_title,
       video_section_content,
       video_section_youtube_url,
@@ -211,24 +177,18 @@ const UpdateProductPage = async (req, res) => {
     try {
       const existingPage = await db.select("tbl_product_page", "*", `tenant_id = ${tenantId}`);
       
-      // ✅ IF NO PAGE EXISTS, CREATE ONE WITH DEFAULTS
+      // ✅ IF NO PAGE EXISTS, CREATE ONE WITH DEFAULTS FROM SHARED SOURCE
       if (!existingPage) {
-        const defaults = getDefaultValues();
+        const defaults = getDefaultProductPageData(); // ✅ Use shared defaults
         const productPageData = {
           tenant_id: tenantId,
-          
-          // Banner Section
-          banner_section_title: banner_section_title || defaults.banner_section_title, // 🆕 Added
+          banner_section_title: banner_section_title || defaults.banner_section_title,
           banner_section_content: banner_section_content || defaults.banner_section_content,
-          
-          // About Product Section
           about_section_title: about_section_title || defaults.about_section_title,
           about_section_content: about_section_content || defaults.about_section_content,
-          
-          // Video Section
           video_section_title: video_section_title || defaults.video_section_title,
           video_section_content: video_section_content || defaults.video_section_content,
-          video_section_youtube_url: video_section_youtube_url || null,
+          video_section_youtube_url: video_section_youtube_url || defaults.video_section_youtube_url || null,
         };
 
         // Handle file uploads for new record
@@ -261,23 +221,18 @@ const UpdateProductPage = async (req, res) => {
       // ✅ PAGE EXISTS - SMART UPDATE (only update fields that are provided)
       const productPageData = {};
 
-      // Banner Section
-      if (banner_section_title !== undefined) { // 🆕 Added
+      if (banner_section_title !== undefined) {
         productPageData.banner_section_title = banner_section_title;
       }
       if (banner_section_content !== undefined) {
         productPageData.banner_section_content = banner_section_content;
       }
-      
-      // About Product Section
       if (about_section_title !== undefined) {
         productPageData.about_section_title = about_section_title;
       }
       if (about_section_content !== undefined) {
         productPageData.about_section_content = about_section_content;
       }
-      
-      // Video Section
       if (video_section_title !== undefined) {
         productPageData.video_section_title = video_section_title;
       }
@@ -308,7 +263,6 @@ const UpdateProductPage = async (req, res) => {
         }
         if (req.files.video_section_file) {
           const file = req.files.video_section_file[0];
-          // Delete old video if it exists and is not a YouTube link
           if (existingPage.video_section_file_url && !video_section_youtube_url) {
             await deleteFromS3(existingPage.video_section_file_url);
           }

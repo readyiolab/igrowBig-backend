@@ -28,21 +28,23 @@ const getDefaultHomePageData = () => ({
 // Default Opportunity Page Data
 const getDefaultOpportunityPageData = () => ({
   hero_section_content: "A lifetime opportunity",
+  hero_section_image_url: "https://images.unsplash.com/photo-1552664730-d307ca884978?w=1200&h=600&fit=crop",
+  
   description_section_content: "<p><strong>Unleashing the power of people and it's potential!</strong></p><p>NHT Global allows you to achieve better health, a countless income opportunity and free time to spend with your loved ones.</p>",
   
   door_section_title: "Open the Door of Opportunity",
   door_section_content: "<ul><li>Take that next step to changing your destiny</li><li>Choose the opportunity that offers you a proven formula to build your own future</li><li>Change your focus to building a healthy lifestyle</li><li>Open your mind to developing a wellness tradition across the globe</li><li>Share this opportunity with others</li><li>Open the door to NHT Global… <strong>Top Network Marketing Company Globally</strong></li></ul>",
-  door_section_image_url: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?q=80&w=2070&auto=format&fit=crop",
+  door_section_image_url: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=1200&h=600&fit=crop",
   
   marketing_section_title: "Why Network Marketing",
   marketing_section_content: "<ul><li>Direct selling industry is more than 50 years old</li><li>More than $110 billion global industry and growing</li><li>Doing business in more than 172 countries worldwide</li><li>People of all ages, races, and backgrounds are involved</li><li>Has empowered millions of people around the world</li><li>High income potential</li><li>Be your own boss</li><li>No employees, no payroll, no storefront and low overhead</li><li>Major tax advantages</li><li>Best chance for the average person to succeed and create a life that is more than average</li><li>Global opportunity with no limits</li></ul><p><strong>Lets Meet World of Opportunity!</strong></p><p>A global company which gives you <strong>True Potential…</strong></p>",
-  marketing_section_image_url: "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?q=80&w=2070&auto=format&fit=crop",
+  marketing_section_image_url: "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1200&h=600&fit=crop",
   
   business_model_section_title: "NHT Global has a PROVEN Business Model",
   business_model_section_content: "<ul><li>Offices worldwide and distribution within more than 50 countries</li><li>More than $1.5 billion in sales and growing</li><li>Member of the Direct Selling Association</li><li>Subsidiary of 23-year-old publicly traded company, Natural Health Trends Corp. (trading symbol: NHTC)</li><li>Experienced executive team and global leaders to support you at each step towards your success</li></ul>",
-  business_model_section_image_url: "https://images.unsplash.com/photo-1552664730-d307ca884978?q=80&w=2070&auto=format&fit=crop",
+  business_model_section_image_url: "https://images.unsplash.com/photo-1552664730-d307ca884978?w=1200&h=600&fit=crop",
   
-  overview_section_title: "NHT Global Opportunity Overview by Found Members",
+  overview_section_title: "NHT Global Opportunity Overview by Founder Members",
   overview_section_youtube_url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
   overview_section_video_url: null,
   
@@ -51,10 +53,11 @@ const getDefaultOpportunityPageData = () => ({
   compensation_plan_document_url: null,
 });
 
-// Default Product Page Data
+// ✅ FIXED: Added missing banner_section_title field
 const getDefaultProductPageData = () => ({
+  banner_section_title: "Welcome to Our Products", // 🆕 ADDED - This was missing!
   banner_section_image_url: "https://images.unsplash.com/photo-1556228720-195a672e8a03?w=1200&h=600&fit=crop",
-  banner_section_content: "Welcome to Our Products",
+  banner_section_content: "Discover amazing products that transform your life",
   
   about_section_title: "Product is Life Line of Any Business",
   about_section_content: "<p>Product is life line of any business. <strong>Unique products</strong> make it very easy to do business. Product in <strong>Health & Wellness, Beauty & Anti Aging</strong> is evergreen and never going to out of business.</p><p>At NHT Global, we understand that different lifestyles call for different needs. For the modern day city dweller in particular, an urban lifestyle is often associated with stress, busy schedules, environmental toxins and pollutants, poor food choices, and work pressure. These factors affect overall quality life and can challenge our bodies in ways that require additional support. From anti-aging skincare to antioxidant rich beverages, NHT products have been designed to supplement your daily routine and help you live a healthier and better life. We target your specific needs with multi-functional, multi-benefit products that are safe, immediate impact, and easy to use and incorporate into your current lifestyle.</p>",
