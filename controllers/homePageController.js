@@ -4,7 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const { checkTenantAuth } = require("../middleware/authMiddleware");
 const { uploadToS3, deleteFromS3 } = require("../services/awsS3");
-const { getDefaultHomePageData } = require("../utils/defaultPagesData"); // ✅ IMPORT DEFAULT DATA
+const { getDefaultHomePageData } = require("../utils/defaultPageData"); // ✅ IMPORT DEFAULT DATA
 require("dotenv").config();
 
 // ✅ Safe file deletion helper
