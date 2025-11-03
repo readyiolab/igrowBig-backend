@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const { checkTenantAuth } = require("../middleware/authMiddleware");
 const { uploadToS3, deleteFromS3 } = require("../services/awsS3");
+const { removeBackground } = require("../services/bgRemovalService"); // 🆕 Import BG removal
 const { DNS_STATUS_ENUM } = require("../config/constants");
 const { sendWebhook } = require("../services/webhookService");
 const { body, validationResult } = require("express-validator");
@@ -396,17 +397,34 @@ const UpdateSettings = [
         updated_at: timestamp,
       };
 
-      // ========== LOGO UPLOAD ==========
+      // ========== 🆕 LOGO UPLOAD WITH BACKGROUND REMOVAL ==========
       if (req.files && req.files["site_logo"]) {
         const logoFile = req.files["site_logo"][0];
         const folder = `settings/tenant_${normalizedTenantId}`;
-        const fileObject = {
-          path: logoFile.path,
-          filename: `${Date.now()}-${logoFile.originalname}`,
-          mimetype: logoFile.mimetype,
-        };
+        
+        let processedImagePath = logoFile.path;
+        let processedBuffer = null;
 
-        // Delete old logo
+        try {
+          // 🎨 Remove background automatically
+          console.log("🖼️ Removing background from logo...");
+          processedBuffer = await removeBackground(logoFile.path);
+
+          // Save processed image temporarily
+          const processedPath = path.join(
+            path.dirname(logoFile.path),
+            `processed-${logoFile.filename}`
+          );
+          fs.writeFileSync(processedPath, processedBuffer);
+          processedImagePath = processedPath;
+
+          console.log("✅ Background removed successfully");
+        } catch (bgError) {
+          console.error("⚠️ Background removal failed, using original image:", bgError.message);
+          // Continue with original image if BG removal fails
+        }
+
+        // Delete old logo from S3
         if (currentSettings.site_logo_url) {
           try {
             await deleteFromS3(currentSettings.site_logo_url);
@@ -415,9 +433,16 @@ const UpdateSettings = [
           }
         }
 
-        // Upload new logo
+        // Upload processed image to S3
         try {
+          const fileObject = {
+            path: processedImagePath,
+            filename: `logo-nobg-${Date.now()}.png`, // Save as PNG
+            mimetype: "image/png",
+          };
+
           settingsData.site_logo_url = await uploadToS3(fileObject, folder);
+          console.log("✅ Logo uploaded to S3:", settingsData.site_logo_url);
         } catch (uploadError) {
           console.error("Logo upload failed:", uploadError);
           return res.status(500).json({
@@ -425,8 +450,12 @@ const UpdateSettings = [
             message: "Failed to upload logo",
           });
         } finally {
+          // Clean up temporary files
           if (fs.existsSync(logoFile.path)) {
             fs.unlinkSync(logoFile.path);
+          }
+          if (processedImagePath !== logoFile.path && fs.existsSync(processedImagePath)) {
+            fs.unlinkSync(processedImagePath);
           }
         }
       }

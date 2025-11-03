@@ -189,7 +189,7 @@ async function getTenantSiteData(req, res) {
     const [
       tenant,
       settings,
-      sliders,
+      
       products,
       categories,
       blogs,
@@ -203,7 +203,7 @@ async function getTenantSiteData(req, res) {
     ] = await Promise.all([
       db.selectAll("tbl_tenants", "*", "id = ?", [tenantId]),
       db.selectAll("tbl_settings", "*", "tenant_id = ?", [tenantId]),
-      db.selectAll("tbl_slider_banners", "*", "tenant_id = ?", [tenantId]),
+      
       db.selectAll("tbl_products", "*", "tenant_id = ? AND status = 'active'", [tenantId]),
       db.selectAll("tbl_categories", "*", "tenant_id = ? AND status = 'active'", [tenantId]),
       db.selectAll("tbl_blogs", "*", "tenant_id = ? AND is_visible = 1", [tenantId]),
@@ -234,7 +234,7 @@ async function getTenantSiteData(req, res) {
       success: true,
       tenant: tenant[0],
       settings: settings[0],
-      sliders,
+     
       products,
       categories,
       blogs,
