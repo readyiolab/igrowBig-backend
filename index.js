@@ -182,18 +182,24 @@ const server = app.listen(PORT, () => {
   console.log(`🌐 Environment: ${process.env.NODE_ENV || "development"}\n`);
 });
 
-process.on("SIGTERM", () => {
-  console.log("SIGTERM signal received: closing HTTP server");
-  server.close(() => {
-    console.log("HTTP server closed");
-    process.exit(0);
-  });
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`FATAL: Port ${PORT} is already in use. Stop the other process (pm2 stop / fuser -k ${PORT}/tcp) then restart.`);
+    process.exit(1);
+  }
+  console.error("Server listen error:", err);
+  process.exit(1);
 });
 
-process.on("SIGINT", () => {
-  console.log("SIGINT signal received: closing HTTP server");
+const shutdown = (signal) => {
+  console.log(`${signal} received: closing HTTP server`);
   server.close(() => {
     console.log("HTTP server closed");
     process.exit(0);
   });
-});
+  // Force exit if close hangs (open keep-alive connections)
+  setTimeout(() => process.exit(1), 10000).unref();
+};
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
