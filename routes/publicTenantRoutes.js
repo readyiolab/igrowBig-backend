@@ -3,7 +3,7 @@ const router = express.Router();
 const {
   getTenantSiteData,
   Bydomain
-} = require("../controllers/publicTenantController.js");
+} = require("../controllers/publicTenantController");
 
 // ✅ PRIMARY ROUTE: Get tenant by domain (subdomain or custom domain)
 router.get("/site/by-domain", Bydomain);

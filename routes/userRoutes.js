@@ -10,7 +10,7 @@ const {
   ChangePassword,
   GetUser
 } = require('../controllers/userController'); // Updated to match new controller naming
-const { authenticateUser } = require('../middleware/authMiddleware');
+const { authenticateUser, authenticateAdmin } = require('../middleware/authMiddleware');
 
 // Public routes
 router.post('/signup', UserSignup);
@@ -19,11 +19,11 @@ router.post('/forgot-password', ForgotPassword); // Public route for password re
 router.post('/reset-password', ResetPassword); // Public route for password reset
 
 // Protected routes (require authentication)
-router.get('/allusers', authenticateUser, GetAllUsers); // Get all users (admin or authenticated)
+router.get('/allusers', authenticateAdmin, GetAllUsers); // Admin only
 router.get('/:id', authenticateUser, GetUser); // Get own user profile
 router.post('/change-password', authenticateUser, ChangePassword); // Change own password
 
-// New: Subscription activation (could be from webhook or admin; protect if needed)
-router.post('/activate-subscription', authenticateUser, ActivateSubscription); // Or make public if from payment gateway
+// Subscription activation — uses authenticated user id from JWT
+router.post('/activate-subscription', authenticateUser, ActivateSubscription);
 
 module.exports = router;

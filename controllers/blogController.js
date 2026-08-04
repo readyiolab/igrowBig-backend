@@ -91,17 +91,26 @@ const GetBlogs = async (req, res) => {
     const blogs = await db.selectAll(
       "tbl_blogs",
       "*",
-      `tenant_id = ${tenantId}`,
+      "tenant_id = ?",
+      [tenantId],
       "ORDER BY created_at DESC"
     );
 
-    for (let blog of blogs) {
-      const banners = await db.selectAll(
-        "tbl_blog_page_banners",
-        "*",
-        `blog_id = ${blog.id} AND tenant_id = ${tenantId}`
-      );
-      blog.banners = banners;
+    const allBanners = await db.selectAll(
+      "tbl_blog_page_banners",
+      "*",
+      "tenant_id = ?",
+      [tenantId]
+    );
+
+    const bannersByBlogId = {};
+    for (const banner of allBanners) {
+      if (!bannersByBlogId[banner.blog_id]) bannersByBlogId[banner.blog_id] = [];
+      bannersByBlogId[banner.blog_id].push(banner);
+    }
+
+    for (const blog of blogs) {
+      blog.banners = bannersByBlogId[blog.id] || [];
     }
 
     res.json(blogs);
@@ -123,7 +132,12 @@ const UpdateBlog = async (req, res) => {
       return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
 
     try {
-      const existingBlog = await db.selectAll("tbl_blogs", "*", `id = ${blogId} AND tenant_id = ${tenantId}`);
+      const existingBlog = await db.selectAll(
+        "tbl_blogs",
+        "*",
+        "id = ? AND tenant_id = ?",
+        [blogId, tenantId]
+      );
       if (!existingBlog || existingBlog.length === 0) {
         if (req.file) safeUnlink(req.file.path);
         return res.status(404).json({ error: "BLOG_NOT_FOUND", message: "Blog not found" });
@@ -143,7 +157,7 @@ const UpdateBlog = async (req, res) => {
       if (imageUrl !== existingBlog[0].image_url) blogUpdateData.image_url = imageUrl;
 
       if (Object.keys(blogUpdateData).length > 0) {
-        await db.update("tbl_blogs", blogUpdateData, `id = ${blogId} AND tenant_id = ${tenantId}`);
+        await db.update("tbl_blogs", blogUpdateData, "id = ? AND tenant_id = ?", [blogId, tenantId]);
       }
 
       res.json({ message: "Blog updated" });
@@ -162,7 +176,7 @@ const DeleteBlog = async (req, res) => {
     return res.status(403).json({ error: "UNAUTHORIZED", message: "Unauthorized" });
 
   try {
-    const blog = await db.selectAll("tbl_blogs", "*", `id = ${blogId} AND tenant_id = ${tenantId}`);
+    const blog = await db.selectAll("tbl_blogs", "*", "id = ? AND tenant_id = ?", [blogId, tenantId]);
     if (!blog || blog.length === 0)
       return res.status(404).json({ error: "BLOG_NOT_FOUND", message: "Blog not found" });
 
@@ -171,14 +185,15 @@ const DeleteBlog = async (req, res) => {
     const banners = await db.selectAll(
       "tbl_blog_page_banners",
       "*",
-      `blog_id = ${blogId} AND tenant_id = ${tenantId}`
+      "blog_id = ? AND tenant_id = ?",
+      [blogId, tenantId]
     );
     for (const banner of banners) {
       if (banner.image_url) await deleteFromS3(banner.image_url);
     }
-    await db.delete("tbl_blog_page_banners", `blog_id = ${blogId} AND tenant_id = ${tenantId}`);
+    await db.delete("tbl_blog_page_banners", "blog_id = ? AND tenant_id = ?", [blogId, tenantId]);
 
-    await db.delete("tbl_blogs", `id = ${blogId} AND tenant_id = ${tenantId}`);
+    await db.delete("tbl_blogs", "id = ? AND tenant_id = ?", [blogId, tenantId]);
     res.json({ message: "Blog and associated banners deleted" });
   } catch (err) {
     console.error("Error in DeleteBlog:", err);
@@ -235,7 +250,8 @@ const UpdateBlogBanner = async (req, res) => {
       const existingBanner = await db.selectAll(
         "tbl_blog_page_banners",
         "*",
-        `id = ${bannerId} AND blog_id = ${blogId} AND tenant_id = ${tenantId}`
+        "id = ? AND blog_id = ? AND tenant_id = ?",
+        [bannerId, blogId, tenantId]
       );
       if (!existingBanner || existingBanner.length === 0) {
         if (req.file) safeUnlink(req.file.path);
@@ -256,7 +272,8 @@ const UpdateBlogBanner = async (req, res) => {
       await db.update(
         "tbl_blog_page_banners",
         bannerData,
-        `id = ${bannerId} AND blog_id = ${blogId} AND tenant_id = ${tenantId}`
+        "id = ? AND blog_id = ? AND tenant_id = ?",
+        [bannerId, blogId, tenantId]
       );
       res.json({ message: "Blog banner updated" });
     } catch (err) {
@@ -277,7 +294,8 @@ const DeleteBlogBanner = async (req, res) => {
     const banner = await db.selectAll(
       "tbl_blog_page_banners",
       "*",
-      `id = ${bannerId} AND blog_id = ${blogId} AND tenant_id = ${tenantId}`
+      "id = ? AND blog_id = ? AND tenant_id = ?",
+      [bannerId, blogId, tenantId]
     );
     if (!banner || banner.length === 0)
       return res.status(404).json({ error: "BANNER_NOT_FOUND", message: "Banner not found" });
@@ -285,7 +303,8 @@ const DeleteBlogBanner = async (req, res) => {
     if (banner[0].image_url) await deleteFromS3(banner[0].image_url);
     await db.delete(
       "tbl_blog_page_banners",
-      `id = ${bannerId} AND blog_id = ${blogId} AND tenant_id = ${tenantId}`
+      "id = ? AND blog_id = ? AND tenant_id = ?",
+      [bannerId, blogId, tenantId]
     );
     res.json({ message: "Blog banner deleted" });
   } catch (err) {

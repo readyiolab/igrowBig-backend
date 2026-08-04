@@ -86,7 +86,7 @@ async function Bydomain(req, res) {
     if (!tenant) {
       console.log(`🔍 [Bydomain] Checking custom domain in tbl_settings: ${cleanHostname}`);
 
-      const customDomainSettings = await db.query(
+      const customDomainSettings = await db.queryAll(
         `SELECT s.*, t.* 
          FROM tbl_settings s
          INNER JOIN tbl_tenants t ON s.tenant_id = t.id
@@ -207,27 +207,30 @@ async function getTenantSiteData(req, res) {
       db.selectAll("tbl_products", "*", "tenant_id = ? AND status = 'active'", [tenantId]),
       db.selectAll("tbl_categories", "*", "tenant_id = ? AND status = 'active'", [tenantId]),
       db.selectAll("tbl_blogs", "*", "tenant_id = ? AND is_visible = 1", [tenantId]),
-      db.select("tbl_home_pages", "*", `tenant_id = ${tenantId}`),
+      db.select("tbl_home_pages", "*", "tenant_id = ?", [tenantId]),
       
-      db.select("tbl_product_page", "*", `tenant_id = ${tenantId}`),
-      db.select("tbl_joinus_page", "*", `tenant_id = ${tenantId}`),
-      db.select("tbl_opportunity_page", "*", `tenant_id = ${tenantId}`),
+      db.select("tbl_product_page", "*", "tenant_id = ?", [tenantId]),
+      db.select("tbl_joinus_page", "*", "tenant_id = ?", [tenantId]),
+      db.select("tbl_opportunity_page", "*", "tenant_id = ?", [tenantId]),
       db.selectAll("tbl_footer_social_links", "*", "tenant_id = ?", [tenantId]),
       db.selectAll("tbl_footer_disclaimers", "*", "tenant_id = ?", [tenantId]),
     ]);
 
-    // ===== Fetch blog banners in parallel =====
-    const blogBannerPromises = blogs.map(blog =>
-      db.selectAll(
-        "tbl_blog_page_banners",
-        "*",
-        `blog_id = ${blog.id} AND tenant_id = ${tenantId}`
-      ).then(banners => {
-        blog.banners = banners;
-      })
+    // ===== Fetch blog banners in one query (avoid N+1) =====
+    const allBanners = await db.selectAll(
+      "tbl_blog_page_banners",
+      "*",
+      "tenant_id = ?",
+      [tenantId]
     );
-
-    await Promise.all(blogBannerPromises);
+    const bannersByBlogId = {};
+    for (const banner of allBanners) {
+      if (!bannersByBlogId[banner.blog_id]) bannersByBlogId[banner.blog_id] = [];
+      bannersByBlogId[banner.blog_id].push(banner);
+    }
+    for (const blog of blogs) {
+      blog.banners = bannersByBlogId[blog.id] || [];
+    }
 
     // ===== Return full tenant site data =====
     return res.json({

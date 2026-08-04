@@ -13,7 +13,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs"); // Sync methods: existsSync, mkdirSync
 const { uploadToS3, deleteFromS3 } = require("../services/awsS3");
-const JWT_SECRET = process.env.JWT_SECRET || "123456";
+const { JWT_SECRET } = require("../config/jwt");
 const { addSubdomain } = require("../services/cloudflareService");
 const {
   startVerificationProcess,
@@ -348,7 +348,7 @@ const CreateUser = [
       try {
         console.log(`📄 Creating default pages for tenant ${tenantId}...`);
         pagesSetup = await createDefaultPagesForTenant(tenantId);
-        
+        console.log('📊 FULL PAGE SETUP RESULT:', JSON.stringify(pagesSetup, null, 2));
         if (pagesSetup.errors.length > 0) {
           console.warn(`⚠️ Some pages failed to create:`, pagesSetup.errors);
         }

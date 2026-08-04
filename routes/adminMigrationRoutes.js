@@ -287,7 +287,7 @@ router.get('/domain-verifications', authenticateAdmin, async (req, res) => {
  * POST /api/admin/test-domain-email
  * Test email sending without modifying database
  */
-router.post('/test-domain-email', async (req, res) => {
+router.post('/test-domain-email', authenticateAdmin, async (req, res) => {
   try {
     const { email, domain, token } = req.body;
     

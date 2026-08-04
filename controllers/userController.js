@@ -10,7 +10,7 @@ const {
   sendResetPasswordEmail, // Added import
   transporter 
 } = require("../config/email");
-const JWT_SECRET = process.env.JWT_SECRET || "123456";
+const { JWT_SECRET } = require("../config/jwt");
 
 const UserSignup = [
   body("email").isEmail().withMessage("Please enter a valid email address"),
@@ -144,22 +144,24 @@ const UserSignup = [
 // Add a function to activate subscription (new)
 const ActivateSubscription = async (req, res) => {
   try {
-    const { user_id } = req.body; // Could come from payment confirmation
+    const user_id = req.user?.id;
     if (!user_id) {
-      return res.status(400).json({ error: "MISSING_USER_ID", message: "User ID is required" });
+      return res.status(401).json({ error: "AUTH_REQUIRED", message: "Authentication required" });
     }
 
-    // Update to 'active' (or '1' if your DB uses integer/string consistently)
-    const result = await db.update("tbl_users", { subscription_status: 'active' }, `id = ${user_id}`);
+    const result = await db.update(
+      "tbl_users",
+      { subscription_status: "active" },
+      "id = ?",
+      [user_id]
+    );
     if (!result || !result.affected_rows) {
       return res.status(404).json({ error: "USER_NOT_FOUND", message: "User not found" });
     }
 
-    // Optionally fetch user for email
-    const user = await db.select("tbl_users", "email, name", `id = ${user_id}`, true);
+    const user = await db.select("tbl_users", "email, name", "id = ?", [user_id]);
     if (user) {
       // Send activation email or notification here if needed
-      // await sendSomeActivationEmail(user.email, { name: user.name });
     }
 
     res.json({ message: "Subscription activated successfully" });
@@ -406,7 +408,7 @@ const ChangePassword = [
       const { currentPassword, newPassword } = req.body;
       const userId = req.user.id; // Assuming auth middleware sets req.user
 
-      const user = await db.select("tbl_users", "*", `id = ${userId}`, true);
+      const user = await db.select("tbl_users", "*", "id = ?", [userId]);
       if (!user) {
         return res.status(404).json({ error: "USER_NOT_FOUND", message: "User not found" });
       }
@@ -417,7 +419,7 @@ const ChangePassword = [
       }
 
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      const result = await db.update("tbl_users", { password_hash: hashedPassword }, `id = ${userId}`);
+      const result = await db.update("tbl_users", { password_hash: hashedPassword }, "id = ?", [userId]);
 
       if (!result || !result.affected_rows) {
         return res.status(500).json({ error: "UPDATE_FAILED", message: "Failed to update password" });
@@ -440,7 +442,12 @@ const GetUser = async (req, res) => {
       return res.status(403).json({ error: "UNAUTHORIZED", message: "No access to this user" });
     }
 
-    const user = await db.select("tbl_users", "id, name, email, tenant_id, subscription_status, created_at", `id = ${userId}`, true);
+    const user = await db.select(
+      "tbl_users",
+      "id, name, email, tenant_id, subscription_status, created_at",
+      "id = ?",
+      [userId]
+    );
     if (!user) {
       return res.status(404).json({ error: "USER_NOT_FOUND", message: "User not found" });
     }

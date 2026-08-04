@@ -128,7 +128,7 @@ router.get('/debug-dns/:subdomain', authenticateAdmin, debugDNS);
 router.post('/cloudflare-verify/:tenantId', authenticateAdmin, cloudflareManualVerify);
 
 // ==================== ADMIN AUTH ROUTES ====================
-router.post("/signup", AdminSignup);
+router.post("/signup", authenticateAdmin, AdminSignup);
 router.post("/login", AdminLogin);
 router.put("/admin-change-password", authenticateAdmin, AdminchangePassword);
 

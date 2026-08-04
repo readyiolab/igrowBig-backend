@@ -106,7 +106,8 @@ const UpdateSliderBanner = async (req, res) => {
       const existingBanner = await db.select(
         "tbl_slider_banners",
         "*",
-        `id = ${bannerId} AND tenant_id = ${tenantId}`
+        "id = ? AND tenant_id = ?",
+        [bannerId, tenantId]
       );
 
       console.log("UpdateBanner - existingBanner:", existingBanner);
@@ -149,7 +150,8 @@ const UpdateSliderBanner = async (req, res) => {
       await db.update(
         "tbl_slider_banners",
         updateData,
-        `id = ${bannerId} AND tenant_id = ${tenantId}`
+        "id = ? AND tenant_id = ?",
+        [bannerId, tenantId]
       );
       res.json({ message: "Slider banner updated" });
     } catch (err) {
@@ -172,7 +174,8 @@ const DeleteSliderBanner = async (req, res) => {
     const banner = await db.select(
       "tbl_slider_banners",
       "*",
-      `id = ${bannerId} AND tenant_id = ${tenantId}`
+      "id = ? AND tenant_id = ?",
+      [bannerId, tenantId]
     );
 
     console.log("DeleteBanner - banner:", banner);
@@ -193,7 +196,8 @@ const DeleteSliderBanner = async (req, res) => {
 
     await db.delete(
       "tbl_slider_banners",
-      `id = ${bannerId} AND tenant_id = ${tenantId}`
+      "id = ? AND tenant_id = ?",
+      [bannerId, tenantId]
     );
     res.json({ message: "Slider banner deleted" });
   } catch (err) {
@@ -212,7 +216,8 @@ const GetSliderBanners = async (req, res) => {
     const banners = await db.selectAll(
       "tbl_slider_banners",
       "*",
-      `tenant_id = ${tenantId}`,
+      "tenant_id = ?",
+      [tenantId],
       "ORDER BY uploaded_on DESC"
     );
     console.log("GetSliderBanners - banners:", banners);

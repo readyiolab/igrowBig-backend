@@ -62,7 +62,7 @@ const AddCategory = async (req, res) => {
     }
 
     try {
-      const tenantCheck = await db.select("tbl_tenants", "*", `id = ${tenantId}`);
+      const tenantCheck = await db.select("tbl_tenants", "*", "id = ?", [tenantId]);
       if (!tenantCheck) {
         return res.status(404).json({
           error: "TENANT_NOT_FOUND",
@@ -125,7 +125,8 @@ const UpdateCategory = async (req, res) => {
       const existingCategory = await db.select(
         "tbl_categories",
         "*",
-        `id = ${categoryId} AND tenant_id = ${tenantId}`
+        "id = ? AND tenant_id = ?",
+        [categoryId, tenantId]
       );
       if (!existingCategory) {
         return res.status(404).json({ error: "CATEGORY_NOT_FOUND", message: "Category not found" });
@@ -151,7 +152,8 @@ const UpdateCategory = async (req, res) => {
       const result = await db.update(
         "tbl_categories",
         updateData,
-        `id = ${categoryId} AND tenant_id = ${tenantId}`
+        "id = ? AND tenant_id = ?",
+        [categoryId, tenantId]
       );
 
       if (!result.affected_rows) {
@@ -161,7 +163,8 @@ const UpdateCategory = async (req, res) => {
       const updatedCategory = await db.select(
         "tbl_categories",
         "*",
-        `id = ${categoryId} AND tenant_id = ${tenantId}`
+        "id = ? AND tenant_id = ?",
+        [categoryId, tenantId]
       );
       res.json({ message: "Category updated", category: updatedCategory });
     } catch (err) {
@@ -182,7 +185,8 @@ const DeleteCategory = async (req, res) => {
     const category = await db.select(
       "tbl_categories",
       "*",
-      `id = ${categoryId} AND tenant_id = ${tenantId}`
+      "id = ? AND tenant_id = ?",
+      [categoryId, tenantId]
     );
     if (!category) {
       return res.status(404).json({ error: "CATEGORY_NOT_FOUND", message: "Category not found" });
@@ -192,7 +196,7 @@ const DeleteCategory = async (req, res) => {
       await deleteFromS3(category.image_url);
     }
 
-    await db.delete("tbl_categories", `id = ${categoryId} AND tenant_id = ${tenantId}`);
+    await db.delete("tbl_categories", "id = ? AND tenant_id = ?", [categoryId, tenantId]);
     res.json({ message: "Category deleted" });
   } catch (err) {
     console.error(err);
@@ -208,7 +212,7 @@ const GetCategories = async (req, res) => {
   }
 
   try {
-    const categories = await db.selectAll("tbl_categories", "*", `tenant_id = ${tenantId}`);
+    const categories = await db.selectAll("tbl_categories", "*", "tenant_id = ?", [tenantId]);
     res.json(categories);
   } catch (err) {
     console.error(err);

@@ -1,6 +1,7 @@
 const express = require("express");
+require("./config/jwt"); // Fail fast if JWT_SECRET is missing/weak
 const app = express();
-const PORT = 3001;
+const PORT = 3002;
 const path = require("path");
 const cors = require("cors");
 const db = require("./config/db");
@@ -13,19 +14,18 @@ const userRoutes = require("./routes/userRoutes");
 const templateRoutes = require("./routes/templateRoutes");
 const publicTenantRoutes = require("./routes/publicTenantRoutes");
 const newsletterRoutes = require("./routes/newsletterRoutes");
-//Global Product Routes
 const GlobalproductRoutes = require('./routes/productRoutes');
-// Initialize Domain Verification Cron Job
+
 setupDomainVerificationCron();
 console.log("✅ Domain verification cron job started");
+
+const isProduction = process.env.NODE_ENV === "production";
 
 // ========== CORS CONFIGURATION ==========
 app.use(
   cors({
     origin: async (origin, callback) => {
-      // Allow requests with no origin (mobile apps, Postman, curl, etc.)
       if (!origin) {
-        console.log("✅ CORS: No origin (allowed for tools/apps)");
         return callback(null, true);
       }
 
@@ -33,25 +33,17 @@ app.use(
         const originHostname = new URL(origin).hostname.toLowerCase();
         const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
 
-        console.log("🔍 CORS Check - Origin:", origin);
-        console.log("🔍 CORS Check - Hostname:", originHostname);
-
-        // ========== ALLOW: Main Domain ==========
         if (
           originHostname === baseDomain ||
           originHostname === `www.${baseDomain}` ||
           originHostname === "localhost"
         ) {
-          console.log("✅ CORS: Main domain allowed");
           return callback(null, true);
         }
 
-        // ========== ALLOW: Verified Subdomains ==========
         if (originHostname.endsWith(`.${baseDomain}`)) {
           const subdomain = originHostname.replace(`.${baseDomain}`, "");
           const fullSubdomain = `${subdomain}.${baseDomain}`;
-
-          console.log("🔍 CORS: Checking subdomain:", fullSubdomain);
 
           const tenant = await db.selectAll(
             "tbl_tenants",
@@ -61,15 +53,9 @@ app.use(
           );
 
           if (tenant.length > 0) {
-            console.log("✅ CORS: Subdomain allowed:", fullSubdomain);
             return callback(null, true);
-          } else {
-            console.log("⚠️ CORS: Subdomain not found:", fullSubdomain);
           }
         }
-
-        // ========== ALLOW: Custom Domains from tbl_tenants ==========
-        console.log("🔍 CORS: Checking custom domain in tbl_tenants:", originHostname);
 
         const customDomainTenant = await db.selectAll(
           "tbl_tenants",
@@ -80,20 +66,15 @@ app.use(
 
         if (customDomainTenant.length > 0) {
           const domainStatus = customDomainTenant[0].custom_domain_status;
-          
           if (domainStatus === "verified") {
-            console.log("✅ CORS: Verified custom domain allowed (tbl_tenants):", originHostname);
-            return callback(null, true);
-          } else {
-            console.log("⚠️ CORS: Custom domain not verified (status: " + domainStatus + "):", originHostname);
-            // Allow for testing purposes
-            console.log("✅ CORS: Allowing unverified custom domain for testing:", originHostname);
             return callback(null, true);
           }
+          // Unverified custom domains only allowed outside production
+          if (!isProduction) {
+            return callback(null, true);
+          }
+          return callback(new Error("Not allowed by CORS"));
         }
-
-        // ========== ALLOW: Custom Domains from tbl_settings (Fallback) ==========
-        console.log("🔍 CORS: Checking custom domain in tbl_settings:", originHostname);
 
         const settings = await db.selectAll(
           "tbl_settings",
@@ -104,26 +85,20 @@ app.use(
 
         if (settings.length > 0) {
           const domainStatus = settings[0].dns_status;
-          
           if (domainStatus === "verified") {
-            console.log("✅ CORS: Verified custom domain allowed (tbl_settings):", originHostname);
-            return callback(null, true);
-          } else {
-            console.log("⚠️ CORS: Custom domain not verified (status: " + domainStatus + "):", originHostname);
-            // Still allow for testing purposes
-            console.log("✅ CORS: Allowing unverified custom domain for testing:", originHostname);
             return callback(null, true);
           }
+          if (!isProduction) {
+            return callback(null, true);
+          }
+          return callback(new Error("Not allowed by CORS"));
         }
 
-        // ========== DENY: Unknown Origin ==========
-        console.log("❌ CORS: Origin not allowed:", origin);
         callback(new Error("Not allowed by CORS"));
       } catch (error) {
-        console.error("❌ CORS validation error:", error);
-        // Allow origin on error to prevent blocking legitimate requests
-        console.log("⚠️ CORS: Allowing origin due to validation error");
-        callback(null, true);
+        console.error("❌ CORS validation error:", error.message);
+        // Fail closed — do not allow unknown origins on error
+        callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
@@ -139,22 +114,17 @@ app.use(
   })
 );
 
-// Add middleware to log all incoming requests
 app.use((req, res, next) => {
-  const hostname = req.get("Host") || req.get("X-Forwarded-Host") || "";
-  const origin = req.get("Origin") || "no-origin";
-  console.log(`📥 ${req.method} ${req.url}`);
-  console.log(`   Host: ${hostname}`);
-  console.log(`   Origin: ${origin}`);
-  console.log(`   X-Forwarded-Host: ${req.get("X-Forwarded-Host") || "none"}`);
+  if (!isProduction) {
+    const hostname = req.get("Host") || req.get("X-Forwarded-Host") || "";
+    console.log(`📥 ${req.method} ${req.url} Host: ${hostname}`);
+  }
   next();
 });
 
-// ========== MIDDLEWARE ==========
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "Uploads")));
 
-// ========== ROUTES ==========
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use('/api/admin', adminMigrationRoutes);
@@ -164,7 +134,6 @@ app.use("/api/newsletters", newsletterRoutes);
 app.use("/api", publicTenantRoutes);
 app.use('/api', GlobalproductRoutes);
 
-// ========== HEALTH CHECK ==========
 app.get("/health", (req, res) => {
   res.status(200).json({
     status: "OK",
@@ -175,6 +144,13 @@ app.get("/health", (req, res) => {
 
 // ========== ERROR HANDLING ==========
 app.use((err, req, res, next) => {
+  if (err.message === "Not allowed by CORS") {
+    return res.status(403).json({
+      error: "CORS_DENIED",
+      message: "Origin not allowed",
+    });
+  }
+
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     console.error("Invalid JSON payload:", err.message);
     return res.status(400).json({
@@ -184,13 +160,14 @@ app.use((err, req, res, next) => {
   }
 
   console.error("Server Error:", err);
-  res.status(500).json({
+  res.status(err.status || 500).json({
     error: "INTERNAL_SERVER_ERROR",
-    message: err.message || "An unexpected error occurred",
+    message: isProduction
+      ? "An unexpected error occurred"
+      : (err.message || "An unexpected error occurred"),
   });
 });
 
-// ========== 404 HANDLER ==========
 app.use((req, res) => {
   res.status(404).json({
     error: "NOT_FOUND",
@@ -199,17 +176,23 @@ app.use((req, res) => {
   });
 });
 
-// ========== START SERVER ==========
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
   console.log(`📍 Base Domain: ${process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com"}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || "development"}\n`);
 });
 
-// ========== GRACEFUL SHUTDOWN ==========
 process.on("SIGTERM", () => {
   console.log("SIGTERM signal received: closing HTTP server");
-  app.close(() => {
+  server.close(() => {
+    console.log("HTTP server closed");
+    process.exit(0);
+  });
+});
+
+process.on("SIGINT", () => {
+  console.log("SIGINT signal received: closing HTTP server");
+  server.close(() => {
     console.log("HTTP server closed");
     process.exit(0);
   });

@@ -98,7 +98,12 @@ const UpdateContactUs = async (req, res) => {
     }
 
     try {
-      const existingContactUs = await db.select("tbl_contactus_page", "*", `id = ${id} AND tenant_id = ${tenantId}`);
+      const existingContactUs = await db.select(
+        "tbl_contactus_page",
+        "*",
+        "id = ? AND tenant_id = ?",
+        [id, tenantId]
+      );
       if (!existingContactUs) {
         return res.status(404).json({ error: "CONTACTUS_NOT_FOUND", message: "Contact Us not found" });
       }
@@ -121,7 +126,7 @@ const UpdateContactUs = async (req, res) => {
         return res.status(400).json({ error: "NO_DATA", message: "No data provided to update" });
       }
 
-      await db.update("tbl_contactus_page", updateData, `id = ${id} AND tenant_id = ${tenantId}`);
+      await db.update("tbl_contactus_page", updateData, "id = ? AND tenant_id = ?", [id, tenantId]);
       res.json({ message: "Contact Us updated" });
     } catch (err) {
       console.error("Error in UpdateContactUs:", err);
@@ -138,7 +143,7 @@ const GetAllContactUs = async (req, res) => {
   }
 
   try {
-    const contactUsItems = await db.selectAll("tbl_contactus_page", "*", `tenant_id = ${tenantId}`);
+    const contactUsItems = await db.selectAll("tbl_contactus_page", "*", "tenant_id = ?", [tenantId]);
     if (contactUsItems.length === 0) {
       return res.status(404).json({ error: "CONTACTUS_NOT_FOUND", message: "No Contact Us items found" });
     }
@@ -161,13 +166,16 @@ const DeleteContactUs = async (req, res) => {
   }
 
   try {
-    const existingContactUs = await db.select("tbl_contactus_page", "*", `id = ${id} AND tenant_id = ${tenantId}`);
+    const existingContactUs = await db.select(
+      "tbl_contactus_page",
+      "*",
+      "id = ? AND tenant_id = ?",
+      [id, tenantId]
+    );
 
     if (!existingContactUs) {
       return res.status(404).json({ error: "CONTACTUS_NOT_FOUND", message: "Contact Us not found" });
     }
-
-    console.log("Existing ContactUs Data:", existingContactUs);
 
     // Delete image from S3 if it exists
     const existingImage = existingContactUs.contactus_image;
@@ -175,7 +183,7 @@ const DeleteContactUs = async (req, res) => {
       await deleteFromS3(existingImage);
     }
 
-    await db.delete("tbl_contactus_page", `id = ${id} AND tenant_id = ${tenantId}`);
+    await db.delete("tbl_contactus_page", "id = ? AND tenant_id = ?", [id, tenantId]);
     res.json({ message: "Contact Us deleted" });
   } catch (err) {
     console.error(err);

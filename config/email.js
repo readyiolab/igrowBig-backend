@@ -270,7 +270,7 @@ const sendPasswordChangeEmail = async (to, name = "User") => {
     <p class="paragraph">Hello ${name},</p>
     <p class="paragraph">Your password was recently changed. If this was you, no further action is needed.</p>
     <p class="paragraph">If you did not make this change, please contact support immediately.</p>
-    <a href="mailto:support@igrowbig.com" class="button">Contact Support</a>
+    <a href="mailto:igrowbignetwork@gmail.com" class="button">Contact Support</a>
     <p class="paragraph">Regards,<br>The iGrow Big Team</p>
   `;
 
@@ -348,7 +348,7 @@ const sendDomainNotification = async (email, domain, status, instructions = null
     // ========== STEP 2: GET CONFIGURATION ==========
     const baseDomain = process.env.CLOUDFLARE_ROOT_DOMAIN || "igrowbig.com";
     const serverIP = process.env.SERVER_IP || "139.59.8.68";
-    const supportEmail = process.env.SUPPORT_EMAIL || "support@igrowbig.com";
+    const supportEmail = process.env.SUPPORT_EMAIL || "igrowbignetwork@gmail.com";
 
     console.log(`Preparing domain notification email:`);
     console.log(`   To: ${email}`);

@@ -154,7 +154,8 @@ const MarkNotificationRead = async (req, res) => {
     const notification = await db.select(
       "tbl_admin_notifications",
       "*",
-      `id = ${notificationId} AND status = 'sent'`
+      "id = ? AND status = ?",
+      [notificationId, "sent"]
     );
 
     if (!notification) {
@@ -225,16 +226,14 @@ const MarkAllNotificationsRead = async (req, res) => {
       });
     }
 
-    // Mark all as read
-    for (const notification of unreadNotifications) {
-      await db.query(
-        `
-        INSERT IGNORE INTO tbl_notification_reads (tenant_id, notification_id, read_at)
-        VALUES (?, ?, NOW())
-        `,
-        [tenantId, notification.id]
-      );
-    }
+    // Mark all as read in one query
+    const values = unreadNotifications.map((n) => [tenantId, n.id]);
+    const placeholders = values.map(() => "(?, ?, NOW())").join(", ");
+    const flatParams = values.flat();
+    await db.insertAll(
+      `INSERT IGNORE INTO tbl_notification_reads (tenant_id, notification_id, read_at) VALUES ${placeholders}`,
+      flatParams
+    );
 
     res.status(200).json({
       message: "All notifications marked as read",
